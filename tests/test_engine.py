@@ -27,7 +27,7 @@ def test_successful_play_and_draw(game2: Game) -> None:
     rig(game2, [[(R, 1), (B, 3)], [(G, 1), (W, 2)]], deck=[(Y, 5), (Y, 4)])
     game2.apply(0, PlayCard(0))
     assert game2.state.stacks[R] == 1
-    assert [str(c) for c in game2.state.hands[0]] == ["blue 3", "yellow 4"]  # new card in LAST slot
+    assert [str(c) for c in game2.state.hands[0]] == ["yellow 4", "blue 3"]  # the new card takes the slot the played card left
     assert game2.state.current == 1
 
 
@@ -39,7 +39,7 @@ def test_misfire_costs_fuse_and_discards(game2: Game) -> None:
 
 
 def test_three_misfires_end_game(game2: Game) -> None:
-    rig(game2, [[(R, 3)] * 5, [(B, 3)] * 5], deck=[(Y, 1)] * 20)
+    rig(game2, [[(R, 3)] * 5, [(B, 3)] * 5], deck=[(R, 4)] * 20)       # refills that cannot be played either
     for seat in (0, 1, 0):
         game2.apply(seat, PlayCard(0))
     assert game2.is_over and game2.state.lost
@@ -70,8 +70,8 @@ def test_completing_a_stack_refunds_hint(game2: Game) -> None:
         (GiveHint(1, R), "reveal nothing"),
         (GiveHint(1, 9), "Unknown hint"),
         (GiveHint(1, 0), "Unknown hint"),
-        (PlayCard(9), "not in your hand"),
-        (DiscardCard(-1), "not in your hand"),
+        (PlayCard(9), "does not exist"),
+        (DiscardCard(-1), "does not exist"),
     ],
 )
 def test_illegal_actions(game2: Game, action: GiveHint | PlayCard | DiscardCard, needle: str) -> None:
@@ -214,14 +214,56 @@ def test_the_snapshot_follows_the_game(game2: Game) -> None:
     assert len(after.discard) == 1 and len(before.discard) == 0
 
 
-def test_rig_sets_a_position_and_leaves_the_rest_alone(game2: Game) -> None:
+def test_rig_sets_up_a_scenario_and_leaves_the_rest_alone(game2: Game) -> None:
     deck_before = game2.state.deck
     rig(game2, [[(R, 1)] * 5, [(B, 1)] * 5])
     assert game2.state.deck == deck_before                                  # the deck is untouched unless asked
     game2.rig(stacks={R: 3}, hints=2, fuses=1)
     st = game2.state
     assert (st.stacks[R], st.hints, st.fuses, st.stacks[B]) == (3, 2, 1, 0)
-    game2.rig(knowledge={(1, 0): CardKnowledge(color=B, not_ranks=frozenset({2}))})        # (seat, position) of a hand slot
+    game2.rig(knowledge={(1, 0): CardKnowledge(color=B, not_ranks=frozenset({2}))})        # (seat, slot)
     assert game2.state.knowledge[1][0] == CardKnowledge(color=B, not_ranks=frozenset({2}))
     with pytest.raises(IndexError):
         game2.rig(knowledge={(1, 99): CardKnowledge()})                     # knowledge is for slots that exist
+
+
+# --- slots: a vacated slot is refilled in place --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", [PlayCard, DiscardCard])
+@pytest.mark.parametrize("slot", [0, 2, 4])
+def test_a_vacated_slot_is_refilled_in_place_and_the_other_slots_do_not_move(game2: Game, action: type, slot: int) -> None:
+    from hanabi_llm.model import DrawEvent
+
+    hand = [(R, 1), (B, 3), (G, 2), (W, 4), (Y, 5)]
+    rig(game2, [hand, [(B, 1)] * 5], deck=[(Y, 4), (G, 5)])
+    before = [str(c) for c in game2.state.hands[0]]
+    events = game2.apply(0, action(slot))
+    after = [str(c) for c in game2.state.hands[0]]
+    assert after[slot] == "green 5"                                           # the top of the deck is in the slot that was used
+    assert [a for i, a in enumerate(after) if i != slot] == [b for i, b in enumerate(before) if i != slot]   # nothing else moved
+    draw = next(e for e in events if isinstance(e, DrawEvent))
+    assert draw.slot == slot and str(draw.card) == "green 5"                  # and the event says which slot it refilled
+
+
+def test_a_new_card_starts_unknown_and_what_was_known_about_the_other_slots_stays(game2: Game) -> None:
+    rig(game2, [[(R, 1)] * 5, [(B, 1), (G, 2), (R, 3), (Y, 4), (W, 5)]], deck=[(Y, 1)] * 5)
+    game2.apply(0, GiveHint(1, R))                                            # Bob's red 3, in slot 2, is now known to be red
+    assert [k.color for k in game2.state.knowledge[1]] == [None, None, R, None, None]
+    game2.apply(1, DiscardCard(0))                                            # a DIFFERENT slot is used: slot 2 is untouched
+    assert [k.color for k in game2.state.knowledge[1]] == [None, None, R, None, None]
+    assert str(game2.state.hands[1][2]) == "red 3"
+    game2.apply(0, DiscardCard(0))
+    game2.apply(1, DiscardCard(2))                                            # the slot that held the known card is used
+    assert [k.color for k in game2.state.knowledge[1]] == [None] * 5          # what was known left with its card; the new one is unknown
+
+
+def test_with_an_empty_deck_the_slot_closes_up_and_what_was_known_shifts_with_the_cards(game2: Game) -> None:
+    """Nothing to refill with: the slot is removed and the later slots shift down by one, knowledge included."""
+    rig(game2, [[(R, 1)] * 5, [(B, 1), (G, 2), (R, 3), (Y, 4), (W, 5)]], deck=[])
+    game2.apply(0, GiveHint(1, R))                                            # slot 2 is known to be red
+    events = game2.apply(1, DiscardCard(0))
+    assert not any(type(e).__name__ == "DrawEvent" for e in events)           # no draw
+    assert [str(c) for c in game2.state.hands[1]] == ["green 2", "red 3", "yellow 4", "white 5"]   # the hand closed up
+    assert [k.color for k in game2.state.knowledge[1]] == [None, R, None, None]                   # the red 3 is now slot 1, still known
+    assert len(game2.state.knowledge[1]) == len(game2.state.hands[1]) == 4

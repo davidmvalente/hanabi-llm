@@ -9,11 +9,11 @@ Plain text is written to survive copy and paste: a card is always "blue 1",
 never a bare "1" with the colour only in a background, and every line starts
 "T7 Alice ...". Examples:
 
-    T7 Alice hinted Carol: position 3 is green
-    T7 Alice hinted Carol: positions 1 and 3 are rank 2
-    T8 Bob discarded blue 1 from position 1
-    T8 Bob drew red 2
-    T10 Alice played blue 2 from position 2 -> misfire (fuse lost)
+    T7 Alice hinted Carol: slot 3 is green
+    T7 Alice hinted Carol: slots 1 and 3 are rank 2
+    T8 Bob discarded blue 1 from slot 1
+    T8 Bob drew red 2 into slot 1
+    T10 Alice played blue 2 from slot 2 -> misfire (fuse lost)
 
 A hint line states what the hint says. That every other card of the hand is
 NOT that colour or rank is a rule (``hint_is_complete``), shown per card in the
@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
+
+from .feed import event_slot
 
 Record = dict[str, Any]
 Segment = dict[str, Any]
@@ -51,16 +53,17 @@ def segments(rec: Record) -> list[Segment]:
         targets = rec["targets"]
         value = {"k": "value", "attribute": rec["attribute"], "value": rec["value"]}
         return [turn, actor, {"k": "text", "v": " hinted "}, {"k": "player", "seat": rec["receiver"]},
-                {"k": "text", "v": f": {'position' if len(targets) == 1 else 'positions'} {_join(targets)} {'is' if len(targets) == 1 else 'are'} "}, value]
+                {"k": "text", "v": f": {'slot' if len(targets) == 1 else 'slots'} {_join(targets)} {'is' if len(targets) == 1 else 'are'} "}, value]
     card: Segment = {"k": "card", "card": rec.get("card")}
     if kind == "play":
         mark = {"k": "mark", "tone": "ok", "v": "placed"} if rec["success"] else {"k": "mark", "tone": "bad", "v": "misfire (fuse lost)"}
-        return [turn, actor, {"k": "text", "v": " played "}, card, {"k": "text", "v": f" from position {rec['position']} "}, mark]
+        return [turn, actor, {"k": "text", "v": " played "}, card, {"k": "text", "v": f" from slot {event_slot(rec)} "}, mark]
     if kind == "discard":
-        return [turn, actor, {"k": "text", "v": " discarded "}, card, {"k": "text", "v": f" from position {rec['position']}"}]
+        return [turn, actor, {"k": "text", "v": " discarded "}, card, {"k": "text", "v": f" from slot {event_slot(rec)}"}]
     if kind == "draw":
         # The drawer is the one who may not see it (a viewer that blinds that player hides it too).
-        return [turn, actor, {"k": "text", "v": " drew "}, {**card, "secret_from": rec["actor"]}]
+        into = [{"k": "text", "v": f" into slot {rec['slot']}"}] if rec.get("slot") is not None else []
+        return [turn, actor, {"k": "text", "v": " drew "}, {**card, "secret_from": rec["actor"]}, *into]
     raise ValueError(f"unknown event kind {kind!r}")
 
 

@@ -50,7 +50,7 @@ from .ontology import HN, Regime
 class CardView:
     """One hand slot as seen by the viewer. ``card`` is None when its identity is hidden."""
 
-    position: int
+    slot: int
     card: Card | None
     knowledge: CardKnowledge
 
@@ -81,7 +81,7 @@ def _redact(event: Event, viewer: Seat, regime: Regime) -> Event:
     replaced by a placeholder with rank 0; renderers show "a new card".
     """
     if isinstance(event, DrawEvent) and not regime.hand_identity_visible(viewer, event.actor):
-        return DrawEvent(event.turn, event.actor, None)
+        return DrawEvent(event.turn, event.actor, None, event.slot)
     return event
 
 
@@ -98,7 +98,7 @@ def build_view(game: Game, viewer: Seat) -> PlayerView:
         hands.append(
             tuple(
                 CardView(
-                    position=i,
+                    slot=i,
                     card=c if regime.hand_identity_visible(viewer, seat) else None,
                     knowledge=st.knowledge[seat][i],
                 )
@@ -249,11 +249,11 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
         zone = hg[f"hand{seat}"]
         g.add((zone, RDF.type, HN.Hand))
         for cv in hand:
-            node = hg[f"hand{seat}_{cv.position}"]
+            node = hg[f"hand{seat}_{cv.slot}"]
             g.add((node, RDF.type, HN.Card))
             g.add((node, HN.heldBy, hg[f"player{seat}"]))
             g.add((node, HN.inZone, zone))
-            g.add((node, HN.position, lit(cv.position)))
+            g.add((node, HN.slot, lit(cv.slot)))
             if cv.card is not None:
                 add_identity(g, node, cv.card, iris)
             add_knowledge(g, node, cv.knowledge, iris)
@@ -293,7 +293,7 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
             else:
                 g.add((node, HN.hintedRank, iris.rank[ev.value]))
             for pos in ev.targets:
-                g.add((node, HN.targetedPosition, lit(pos)))
+                g.add((node, HN.targetedSlot, lit(pos)))
         elif isinstance(ev, DrawEvent):
             g.add((node, RDF.type, HN.DrawEvent))
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))

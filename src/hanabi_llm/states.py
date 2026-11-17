@@ -97,10 +97,10 @@ def _hands(view: PlayerView, rules: RuleSet) -> str:
         for cv in hand:
             know = describe_knowledge(cv.knowledge)
             if cv.card is None:
-                lines.append(f"  position {cv.position}: {know}")
+                lines.append(f"  slot {cv.slot}: {know}")
             else:
-                lines.append(f"  position {cv.position}: {cv.card}   ({'you' if seat == view.viewer else 'they'} know: {know})")
-    lines.append("New cards enter at the last position; cards after a removed one shift down by one.")
+                lines.append(f"  slot {cv.slot}: {cv.card}   ({'you' if seat == view.viewer else 'they'} know: {know})")
+    lines.append("A card that is played or discarded is replaced from the deck in the same slot; the other slots do not move.")
     return "\n".join(lines)
 
 

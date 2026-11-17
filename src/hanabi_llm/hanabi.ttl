@@ -67,8 +67,10 @@ hn:hasRank        a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Rank .
 hn:stackOf        a rdf:Property ; rdfs:domain hn:Stack ; rdfs:range hn:Color .
 hn:stackHeight    a rdf:Property ; rdfs:domain hn:Stack ; rdfs:range xsd:integer .
 hn:seatIndex      a rdf:Property ; rdfs:domain hn:Player ; rdfs:range xsd:integer .
-hn:position       a rdf:Property ; rdfs:domain hn:Card ; rdfs:range xsd:integer ;
-                  rdfs:comment "Slot index within the holder's hand. Public." .
+hn:slot           a rdf:Property ; rdfs:domain hn:Card ; rdfs:range xsd:integer ;
+                  rdfs:comment "The slot a card occupies in a hand (0-based). A slot is a place that persists: the card in it changes when it is played or discarded and refilled, the slot does not move. Public." .
+hn:deckIndex      a rdf:Property ; rdfs:domain hn:Card ; rdfs:range xsd:integer ;
+                  rdfs:comment "Where a card is in the deck, 0 = bottom. Exists only in the ground-truth graph: the deck is never shown." .
 hn:colorName      a rdf:Property ; rdfs:domain hn:Color ; rdfs:range xsd:string .
 hn:rankValue      a rdf:Property ; rdfs:domain hn:Rank ; rdfs:range xsd:integer .
 hn:copiesPerColor a rdf:Property ; rdfs:domain hn:Rank ; rdfs:range xsd:integer .
@@ -95,8 +97,8 @@ hn:succeeded      a rdf:Property ; rdfs:domain hn:PlayEvent ; rdfs:range xsd:boo
 hn:hintedColor    a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Color ;
                   rdfs:comment "A hint names a colour (this property) or a rank (hn:hintedRank), never both." .
 hn:hintedRank     a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Rank .
-hn:targetedPosition a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range xsd:integer ;
-                  rdfs:comment "A position in the receiver's hand that the hint covers. Together they are the subset of the hand the hint targets: every card with the named colour or rank." .
+hn:targetedSlot  a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range xsd:integer ;
+                  rdfs:comment "A slot in the receiver's hand that the hint covers. Together they are the subset of the hand the hint targets: every card with the named colour or rank." .
 hn:turnNumber     a rdf:Property ; rdfs:range xsd:integer ;
                   rdfs:comment "The turn an event happened in, or the current turn of the game." .
 
@@ -208,7 +210,7 @@ hn:RuleHintIsComplete a hn:Rule ;
     hn:ruleName "hint_is_complete" ;
     hn:ruleText "A hint always covers EVERY card in the receiver's hand with the named colour or rank. The cards it targets are exactly those, so it also tells the receiver that all the other cards are not that colour or rank." ;
     hn:rationale "Hints are complete, never partial. That makes a hint both honest and informative: the receiver learns what the targeted cards are and, from the cards left out, what the others are not." ;
-    hn:example "Bob holds red 2, red 4 and blue 1. Hinting 'red' targets positions 0 and 1, and also tells Bob that his blue 1 is not red." .
+    hn:example "Bob holds red 2, red 4 and blue 1. Hinting 'red' targets slots 0 and 1, and also tells Bob that his blue 1 is not red." .
 
 hn:RuleHintExactlyOneAttribute a hn:Rule ;
     hn:ruleName "hint_one_attribute" ;
@@ -219,9 +221,9 @@ hn:RuleHintExactlyOneAttribute a hn:Rule ;
 
 hn:RuleCardInHand a hn:Rule ;
     hn:ruleName "card_in_hand" ;
-    hn:ruleText "A played or discarded card must be in the acting player's hand at the given position." ;
+    hn:ruleText "A played or discarded card must be in the acting player's hand, in a slot that exists." ;
     hn:rationale "You can only act on cards you actually hold, and you refer to them by slot because you cannot see them." ;
-    hn:example "With 5 cards in hand the valid positions are 0 to 4." ;
+    hn:example "With 5 cards in hand the valid slots are 0 to 4." ;
     hn:checkFunction "card_in_hand" .
 
 hn:RuleHintRefund a hn:Rule ;
@@ -230,6 +232,12 @@ hn:RuleHintRefund a hn:Rule ;
     hn:rationale "Discards buy back information, and finishing a firework refinances the team." ;
     hn:example "Discarding at 5 tokens gives 6. Discarding at the maximum of 8 gains nothing." ;
     hn:effectFunction "refund_hint" .
+
+hn:RuleSlotRefill a hn:Rule ;
+    hn:ruleName "slot_refill" ;
+    hn:ruleText "A card that is played or discarded is replaced by the top card of the deck in the same slot, so the other slots do not move. When the deck is empty the slot is removed instead and the later slots shift down by one." ;
+    hn:rationale "Slots stay put, so what you were told about a slot, and how you refer to it, stays valid after plays and discards by others and by you; only the card in the slot you used changes." ;
+    hn:example "Carol plays slot 0 and draws a red 3: the red 3 is now in slot 0, and slots 1 to 4 are unchanged." .
 
 hn:RuleMisfireCostsFuse a hn:Rule ;
     hn:ruleName "misfire_costs_fuse" ;
@@ -269,18 +277,18 @@ hn:AffPlayCard a hn:Affordance ;
     hn:functionName "play_card" ;
     hn:description "ACTION (ends your turn). Play a card from your own hand. If it is the next card of its colour's firework it is placed; otherwise it is discarded and a fuse token is spent. You cannot see your own cards." ;
     hn:requires hn:RuleCardInHand ;
-    hn:appliesRule hn:RuleMisfireCostsFuse, hn:RuleHintRefund ;
+    hn:appliesRule hn:RuleMisfireCostsFuse, hn:RuleHintRefund, hn:RuleSlotRefill ;
     hn:effectFunction "decide_play_card" ;
-    hn:hasParameter hn:ParamPlayPosition .
+    hn:hasParameter hn:ParamPlaySlot .
 
 hn:AffDiscardCard a hn:Affordance ;
     hn:family "action" ; hn:endsTurn true ;
     hn:functionName "discard_card" ;
     hn:description "ACTION (ends your turn). Discard one card from your own hand to the public discard pile. Gives back one hint token if any is spent." ;
     hn:requires hn:RuleCardInHand ;
-    hn:appliesRule hn:RuleHintRefund ;
+    hn:appliesRule hn:RuleHintRefund, hn:RuleSlotRefill ;
     hn:effectFunction "decide_discard_card" ;
-    hn:hasParameter hn:ParamDiscardPosition .
+    hn:hasParameter hn:ParamDiscardSlot .
 
 hn:AffGiveHint a hn:Affordance ;
     hn:family "action" ; hn:endsTurn true ;
@@ -291,13 +299,13 @@ hn:AffGiveHint a hn:Affordance ;
     hn:effectFunction "decide_give_hint" ;
     hn:hasParameter hn:ParamHintReceiver, hn:ParamHintValue .
 
-hn:ParamPlayPosition a hn:Parameter ;
-    hn:paramName "position" ; hn:paramType "integer" ;
-    hn:paramDescription "Slot index (0-based) of the card in your hand to play." .
+hn:ParamPlaySlot a hn:Parameter ;
+    hn:paramName "slot" ; hn:paramType "integer" ;
+    hn:paramDescription "Slot (0-based) of the card in your hand to play." .
 
-hn:ParamDiscardPosition a hn:Parameter ;
-    hn:paramName "position" ; hn:paramType "integer" ;
-    hn:paramDescription "Slot index (0-based) of the card in your hand to discard." .
+hn:ParamDiscardSlot a hn:Parameter ;
+    hn:paramName "slot" ; hn:paramType "integer" ;
+    hn:paramDescription "Slot (0-based) of the card in your hand to discard." .
 
 hn:ParamHintReceiver a hn:Parameter ;
     hn:paramName "player" ; hn:paramType "player" ;
@@ -350,7 +358,7 @@ hn:ParamTopic a hn:Parameter ;
 #    knowledge, view).
 #
 #    identityVisibility says who may see the IDENTITY (colour and rank) of the
-#    cards in a kind of zone. A card's existence and position are always
+#    cards in a kind of zone. A card's existence and slot are always
 #    public; only its identity is governed here.
 # ---------------------------------------------------------------------------
 

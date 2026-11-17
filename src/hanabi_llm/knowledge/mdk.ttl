@@ -18,12 +18,12 @@ hn:OneActionPerTurn a hn:Concept ; hn:category "mechanic" ; hn:conceptName "one_
     hn:guidance "Reading the state and the rules never costs a turn, so check the state and the discard pile before acting." .
 
 hn:HintGrammar a hn:Concept ; hn:category "mechanic" ; hn:conceptName "hint_grammar" ;
-    hn:summary "A hint names one colour or one rank and reveals EVERY matching card in a teammate's hand, including the positions that do not match (negative information)." ;
+    hn:summary "A hint names one colour or one rank and reveals EVERY matching card in a teammate's hand, including the slots that do not match (negative information)." ;
     hn:guidance "Pick the hint whose targets are most informative. A hint that targets one card of the right kind usually means 'play that one'. Cards NOT targeted are also informed: they are not that colour or rank." .
 
-hn:HandShift a hn:Concept ; hn:category "mechanic" ; hn:conceptName "hand_shift" ;
-    hn:summary "Positions are 0-based. When a card leaves your hand, later cards slide down one slot and the new card enters in the LAST slot." ;
-    hn:guidance "Track positions after every play or discard, yours and your teammates'. A hint's meaning is tied to the positions at the time it was given." .
+hn:StableSlots a hn:Concept ; hn:category "mechanic" ; hn:conceptName "stable_slots" ;
+    hn:summary "Slots are 0-based and stay put: a card that is played or discarded is replaced in the same slot. Only when the deck is empty does a vacated slot close up and the later slots shift down by one." ;
+    hn:guidance "What a hint told you about slot 2 is still true of slot 2 until you play or discard it; after that the new card in it is unknown. Slots are the same for everyone, so a hint to a teammate stays valid however the others play." .
 
 hn:TokenRefund a hn:Concept ; hn:category "mechanic" ; hn:conceptName "token_refund" ;
     hn:summary "Discarding returns one hint token (never above the maximum). Completing a stack with its 5 also returns one." ;
@@ -82,7 +82,7 @@ hn:BeliefInertia a hn:Concept ; hn:category "kinetic" ; hn:conceptName "belief_i
 
 hn:HintTorque a hn:Concept ; hn:category "kinetic" ; hn:conceptName "hint_torque" ;
     hn:summary "Leverage of a hint: how much it changes what the receiver will do. Targeting a card that is playable right now has high leverage; targeting a dead card has almost none." ;
-    hn:measuredBy hn:targetedPosition ;
+    hn:measuredBy hn:targetedSlot ;
     hn:guidance "Prefer the hint with the greatest effect on the receiver's next action. If a hint can be read two ways, the receiver may pick the wrong one." .
 
 hn:ActivationEnergy a hn:Concept ; hn:category "kinetic" ; hn:conceptName "activation_energy" ;

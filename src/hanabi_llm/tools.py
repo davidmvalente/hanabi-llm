@@ -161,9 +161,9 @@ def build_action(game: Game, name: str, args: JSON) -> Action:
     """Turn tool arguments into an ``Action``. Raises ``IllegalAction`` if malformed."""
     match name:
         case "play_card":
-            return PlayCard(_as_int(args.get("position"), "position"))
+            return PlayCard(_as_int(args.get("slot"), "slot"))
         case "discard_card":
-            return DiscardCard(_as_int(args.get("position"), "position"))
+            return DiscardCard(_as_int(args.get("slot"), "slot"))
         case "give_hint":
             names = game.state.names
             player = args.get("player")

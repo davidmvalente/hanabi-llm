@@ -65,7 +65,7 @@ async def test_reads_are_free_then_one_action_ends_turn() -> None:
 
 async def test_first_message_carries_the_whole_state() -> None:
     game = rigged()
-    client = ScriptedClient([call("discard_card", {"position": 0})])
+    client = ScriptedClient([call("discard_card", {"slot": 0})])
     await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
     system, user = client.seen[0][0]["content"], client.seen[0][1]["content"]
     assert user.count("## ") == 6 and "Choose your action now." in user
@@ -75,13 +75,13 @@ async def test_first_message_carries_the_whole_state() -> None:
 async def test_read_tool_mistakes_never_disqualify() -> None:
     game = rigged()
     client = ScriptedClient([call("get_state", {"section": "nope"}, str(i)) for i in range(5)]
-                            + [call("discard_card", {"position": 0})])
+                            + [call("discard_card", {"slot": 0})])
     assert (await LLMPlayer("Ann", client, game, 0, max_calls=8).take_turn(ctx_for(game))).action == DiscardCard(0)
 
 
 async def test_rejected_actions_are_a_model_fault() -> None:
     game = rigged()
-    client = ScriptedClient([call("play_card", {"position": 99})] * DEFAULT_MAX_FAILED_ACTIONS)
+    client = ScriptedClient([call("play_card", {"slot": 99})] * DEFAULT_MAX_FAILED_ACTIONS)
     with pytest.raises(PlayerFault) as exc:
         await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
     assert exc.value.kind is FaultKind.INVALID_ACTIONS and exc.value.kind.attributable
@@ -90,7 +90,7 @@ async def test_rejected_actions_are_a_model_fault() -> None:
 
 async def test_recovering_after_one_rejection() -> None:
     game = rigged()
-    client = ScriptedClient([call("play_card", {"position": 99}), call("play_card", {"position": 0})])
+    client = ScriptedClient([call("play_card", {"slot": 99}), call("play_card", {"slot": 0})])
     assert (await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))).action == PlayCard(0)
 
 
@@ -110,7 +110,7 @@ async def test_a_fault_says_exactly_what_was_rejected_and_why() -> None:
     """The three things a model can get wrong are each named in the fault, in order, with the error it was given."""
     game = rigged()
     client = ScriptedClient([
-        call("play_card", {"position": 99}, "a"),                       # a position it does not have
+        call("play_card", {"slot": 99}, "a"),                       # a slot it does not have
         Completion("Let me think about the best move for the team...", ()),   # no tool call at all
         call("give_hint", {"player": "Ann", "hint": "red"}, "b"),        # a hint to itself
     ])
@@ -119,7 +119,7 @@ async def test_a_fault_says_exactly_what_was_rejected_and_why() -> None:
     detail = exc.value.detail
     assert detail.startswith("3 rejected action attempts in one turn: ")
     parts = detail.split(": ", 1)[1].split(" | ")
-    assert parts[0].startswith('play_card({"position": 99}) -> Error:') and "not in your hand" in parts[0]
+    assert parts[0].startswith('play_card({"slot": 99}) -> Error:') and "does not exist" in parts[0]
     assert parts[1] == 'no tool call, it said: "Let me think about the best move for the team..."'
     assert parts[2].startswith("give_hint(") and "cannot give a hint to yourself" in parts[2]
     assert [m["role"] for m in exc.value.trace][-1] == "tool"                 # and the whole conversation travels with it
@@ -152,7 +152,7 @@ async def test_noninterference_whole_conversation() -> None:
     async def conversation(hand: list, deck: list) -> list[list[JSON]]:  # type: ignore[type-arg]
         game = rig(Game(["Ann", "Bob"], seed=0), [hand, [(B, 1)] * 5], deck=deck)
         client = ScriptedClient([call("get_state", {}, "a"), call("explain_rules", {}, "b"),
-                                 call("get_state", {"section": "hands"}, "c"), call("discard_card", {"position": 0}, "d")])
+                                 call("get_state", {"section": "hands"}, "c"), call("discard_card", {"slot": 0}, "d")])
         await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
         return client.seen
 
@@ -260,7 +260,7 @@ async def test_openrouter_parses_tool_calls_retries_and_sends_limits(monkeypatch
         assert request.headers["authorization"] == "Bearer k"
         return httpx.Response(200, json={
             "choices": [{"message": {"content": None, "tool_calls": [
-                {"id": "t1", "type": "function", "function": {"name": "play_card", "arguments": "{\"position\": 1}"}}]}}],
+                {"id": "t1", "type": "function", "function": {"name": "play_card", "arguments": "{\"slot\": 1}"}}]}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 3},
         })
 

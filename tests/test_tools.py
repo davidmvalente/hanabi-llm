@@ -52,8 +52,8 @@ def test_actions_are_validated_not_applied() -> None:
     game = rigged()
     tb = toolbox(game)
     before = (game.state.turn, len(game.state.events), game.state.hints)
-    assert tb.execute("play_card", {"position": 0}).action == PlayCard(0)
-    assert tb.execute("discard_card", {"position": "2"}).action == DiscardCard(2)   # numeric strings tolerated
+    assert tb.execute("play_card", {"slot": 0}).action == PlayCard(0)
+    assert tb.execute("discard_card", {"slot": "2"}).action == DiscardCard(2)   # numeric strings tolerated
     assert tb.execute("give_hint", {"player": "Bob", "hint": "blue"}).action == GiveHint(1, B)
     assert tb.execute("give_hint", {"player": "Bob", "hint": "1"}).action == GiveHint(1, 1)    # the attribute follows from the value
     assert tb.execute("give_hint", {"player": "Bob", "hint": 1}).action == GiveHint(1, 1)      # a bare integer is tolerated
@@ -63,7 +63,7 @@ def test_actions_are_validated_not_applied() -> None:
 
 def test_rejected_actions_count_but_read_mistakes_are_free(game2: Game) -> None:
     tb = toolbox(game2)
-    for call in (("play_card", "not json"), ("play_card", {"position": 99}), ("give_hint", {"player": "Nobody", "hint": "red"}),
+    for call in (("play_card", "not json"), ("play_card", {"slot": 99}), ("give_hint", {"player": "Nobody", "hint": "red"}),
                  ("give_hint", {"player": "Ann", "hint": "red"}), ("give_hint", {"player": "Bob"}),
                  ("give_hint", {"player": "Bob", "hint": "purple"}), ("give_hint", {"player": "Bob", "hint": True}),
                  ("nonsense", {})):
@@ -132,8 +132,8 @@ def test_wrong_argument_names_get_an_error_that_says_what_the_tool_takes(game2: 
     assert "It takes: hint (required), player (required)." in old_shape.text
     half = tb.execute("give_hint", {"player": "Bob"})
     assert "missing required argument(s) ['hint']" in half.text and "unexpected" not in half.text
-    assert "play_card: missing required argument(s) ['position']" in tb.execute("play_card", {}).text
-    assert "It takes: position (required)." in tb.execute("discard_card", {"pos": 1}).text
+    assert "play_card: missing required argument(s) ['slot']" in tb.execute("play_card", {}).text
+    assert "It takes: slot (required)." in tb.execute("discard_card", {"pos": 1}).text
 
 
 def test_argument_mistakes_in_read_tools_are_free_and_just_as_clear(game2: Game) -> None:
@@ -142,4 +142,4 @@ def test_argument_mistakes_in_read_tools_are_free_and_just_as_clear(game2: Game)
     assert out.is_error and not out.failed_action
     assert "unexpected argument(s) ['part']" in out.text and "It takes: section (optional)." in out.text
     assert not tb.execute("get_state", {}).is_error and not tb.execute("explain_rules", {}).is_error     # all-optional tools still work bare
-    assert tb.execute("play_card", {"position": 0, "extra": 1}).failed_action                            # extras are refused, not ignored
+    assert tb.execute("play_card", {"slot": 0, "extra": 1}).failed_action                            # extras are refused, not ignored

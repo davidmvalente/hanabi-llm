@@ -15,9 +15,9 @@ hn:TruthCardShape a sh:NodeShape ; sh:targetClass hn:Card ;
     sh:property [ sh:path hn:hasColor  ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "Every card has exactly one colour." ] ;
     sh:property [ sh:path hn:hasRank   ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "Every card has exactly one rank." ] ;
     sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
-        sh:message "A card in a hand is held by exactly one player and has a position." ;
+        sh:message "A card in a hand is held by exactly one player and has a slot." ;
         sh:select """SELECT $this WHERE { $this hn:inZone ?z . ?z a hn:Hand .
-                     FILTER ( NOT EXISTS { $this hn:heldBy ?p } || NOT EXISTS { $this hn:position ?i } ) }""" ] ;
+                     FILTER ( NOT EXISTS { $this hn:heldBy ?p } || NOT EXISTS { $this hn:slot ?i } ) }""" ] ;
     # Hints never lie: what a holder was told equals the truth.
     sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
         sh:message "A hint told the holder a colour or rank that is not the card's." ;

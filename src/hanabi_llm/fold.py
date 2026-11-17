@@ -27,7 +27,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .feed import Record
+from .feed import Record, event_slot
 from .registry import bind
 
 
@@ -169,10 +169,11 @@ def step(s: FoldState, rec: Record) -> None:
                 card.not_ranks.append(value)
     elif kind in ("play", "discard"):
         _begin_action(s, rec)
-        gone = s.hands[rec["actor"]].pop(rec["position"])
+        slot = event_slot(rec)
+        gone = s.hands[rec["actor"]].pop(slot)
         shown = {"color": rec["card"]["color"], "rank": rec["card"]["rank"]}  # a played or discarded card is revealed to everyone
         if gone.color is not None and (gone.color, gone.rank) != (shown["color"], shown["rank"]):
-            raise ValueError(f"feed inconsistent: position {rec['position']} held {gone.color} {gone.rank}, the event says {shown['color']} {shown['rank']}")
+            raise ValueError(f"feed inconsistent: slot {slot} held {gone.color} {gone.rank}, the event says {shown['color']} {shown['rank']}")
         if kind == "play" and rec["success"]:
             s.played.append(shown)
             s.stacks[shown["color"]] = shown["rank"]
@@ -185,7 +186,11 @@ def step(s: FoldState, rec: Record) -> None:
             else:
                 refund_hint(s)
     elif kind == "draw":
-        s.hands[rec["actor"]].append(FoldCard.from_record(rec["card"]))
+        hand = s.hands[rec["actor"]]
+        if rec.get("slot") is None:
+            hand.append(FoldCard.from_record(rec["card"]))  # an older feed: the new card went last
+        else:
+            hand.insert(rec["slot"], FoldCard.from_record(rec["card"]))  # in place: pop then insert at the same slot
         s.deck_size -= 1
         if s.deck_size == 0 and s.final_turns_left is None:
             s.final_turns_left = len(s.names)  # the player who drew the last card also gets a final turn

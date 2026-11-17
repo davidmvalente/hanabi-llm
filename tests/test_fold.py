@@ -120,7 +120,7 @@ def test_a_feed_that_contradicts_itself_is_refused() -> None:
     state = initial_state(header)
     real = header["deal"]["hands"][0][0]
     other = {"color": "red" if real["color"] != "red" else "blue", "rank": real["rank"]}      # not the card that is in that slot
-    wrong = {"type": "event", "kind": "discard", "turn": 1, "actor": 0, "position": 0, "card": other}
+    wrong = {"type": "event", "kind": "discard", "turn": 1, "actor": 0, "slot": 0, "card": other}
     with pytest.raises(ValueError, match="inconsistent"):
         step(state, wrong)
 
@@ -130,7 +130,7 @@ def test_a_hidden_card_is_not_checked_against_the_event_that_reveals_it() -> Non
     game = Game(["Ann", "Bob"], seed=2)
     mine = fold([project_record(header_record(game, {}, {}), 0, game.ontology.regime)])
     assert all(c.color is None for c in mine.hands[0])
-    step(mine, {"type": "event", "kind": "discard", "turn": 1, "actor": 0, "position": 0, "card": {"color": "red", "rank": 1}})
+    step(mine, {"type": "event", "kind": "discard", "turn": 1, "actor": 0, "slot": 0, "card": {"color": "red", "rank": 1}})
     assert mine.discard == [{"color": "red", "rank": 1}] and len(mine.hands[0]) == 4
 
 

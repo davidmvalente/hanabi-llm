@@ -198,6 +198,27 @@ leak (ids sorted by colour and rank) came from it. Now:
 * In the RDF graphs a card is named by where it is (`hand0_2`, `deck_7`, `discard_1`), not by an id.
 * A hidden draw is `DrawEvent(card=None)`, not a placeholder card.
 
+## Slots: a vacated slot is refilled in place
+
+Reported from a real run: Carol played her slot 0 and drew a red 3, yet the new card appeared at the
+end of her hand and her old slot 1 became slot 0. The engine did what it documented (shift the
+others down, append the new card), but that is a design flaw for this project: a slot number is the
+only way a model can refer to a card, and with shift-and-append every reference goes stale after every
+play or discard, which is exactly what small models get wrong.
+
+* **A played or discarded card is replaced from the deck in the same slot**; the other slots never
+  move, so what a hint said about a slot stays true until that slot is used. Only when the deck is
+  empty is there nothing to refill with: the slot is removed and the later slots shift down by one
+  (knowledge shifts with them). The draw event now says which slot it refilled.
+* **The vocabulary is "slot"** everywhere: tool arguments (`play_card(slot)`), the feed (schema 3), the
+  state text, the narration (`T3 Carol drew red 3 into slot 0`), the rules and the ontology
+  (`hn:slot`, `hn:targetedSlot`; a card's place in the deck is `hn:deckIndex`). Older feeds that say
+  `position`, and draws with no slot (the old append behaviour), still play back.
+* **A new rule is documented** (`slot_refill`, shown by `explain_rules`) and the concept note
+  `hand_shift` became `stable_slots`.
+* Hanabi's own rules leave the arrangement of a hand to the players (the community convention is to
+  shift cards and draw at one end); this is a project choice made for robustness.
+
 ## v1.1 plan: token parsimony and caching
 
 **Is the conversation cached?** Partly, and not as a "thread". Each API call is

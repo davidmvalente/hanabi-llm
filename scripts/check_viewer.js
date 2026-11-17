@@ -28,8 +28,8 @@ const assert = (cond, msg) => { if (!cond) { throw new Error('ASSERTION FAILED: 
   assert((await page.locator('#log div').count()) === nonDraw, `the log has one line per action (${nonDraw}); a draw joins the line of the action it followed`);
   const texts = await page.locator('#log div').allInnerTexts();
   assert(texts.every((t) => !/^T\d+ \w+ drew/.test(t)), 'no line is a bare draw');
-  assert(texts.some((t) => /^T\d+ \w+ hinted \w+: positions? [\d, and]+ (is|are) (red|yellow|green|blue|white|rank \d)$/.test(t)), 'hint lines read "Alice hinted Bob: position 3 is green"');
-  assert(texts.some((t) => /^T\d+ \w+ (played|discarded) (red|yellow|green|blue|white) \d from position \d( ✓ placed| ✗ misfire \(fuse lost\))?( and drew (red|yellow|green|blue|white) \d)?$/.test(t)), 'cards read "blue 1", never a bare number');
+  assert(texts.some((t) => /^T\d+ \w+ hinted \w+: slots? [\d, and]+ (is|are) (red|yellow|green|blue|white|rank \d)$/.test(t)), 'hint lines read "Alice hinted Bob: slot 3 is green"');
+  assert(texts.some((t) => /^T\d+ \w+ (played|discarded) (red|yellow|green|blue|white) \d from slot \d( ✓ placed| ✗ misfire \(fuse lost\))?( and drew (red|yellow|green|blue|white) \d into slot \d)?$/.test(t)), 'cards read "blue 1", never a bare number');
   assert((await page.locator('#log .chip').allInnerTexts()).every((t) => /^(red|yellow|green|blue|white) \d$/.test(t)), 'every card chip carries its colour in its text');
   assert(texts.every((t) => /^T\d+ /.test(t) || t.startsWith('end')), 'every line starts "T7 " with a space after the turn');
   assert(await page.locator('#log .pname').first().evaluate((e) => e.style.color !== ''), 'player names are coloured');
@@ -38,7 +38,7 @@ const assert = (cond, msg) => { if (!cond) { throw new Error('ASSERTION FAILED: 
   // 2. scrub to mid-game and screenshot, default view
   const mid = 38;
   await page.$eval('#scrub', (el, v) => { el.value = v; el.dispatchEvent(new Event('input')); }, mid);
-  assert(await page.locator('#pos').innerText() === `${mid}/${n - 1}`, 'scrubbing moves to frame ' + mid);
+  assert(await page.locator('#frame').innerText() === `${mid}/${n - 1}`, 'scrubbing moves to frame ' + mid);
   const nonDrawMid = await page.evaluate((m) => frames.slice(1, m + 1).filter((f) => f.record.kind !== 'draw').length, mid);
   assert((await page.locator('#log div').count()) === nonDrawMid, 'the log shows only events up to that frame');
   assert(await page.locator('#follow').isChecked() === false, 'scrubbing back stops following live');

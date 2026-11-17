@@ -15,7 +15,7 @@ heart of the model. It is defined in **one declaration**, interpreted in
 | Layer | What it is | Lives in |
 |---|---|---|
 | 1. Ground truth | Every card, hidden ones included, and the true order of the deck. Written only by `Game.apply`. | `GameState` (`engine.py`). As RDF: `validate.truth_graph`, used only for validation, never shown to a model. |
-| 2. Information regime | The policy: who may see the *identity* (colour and rank) of the cards in each kind of zone. A card's existence and position are always public. | Ontology section 7, loaded as `Regime` (`ontology.py`). |
+| 2. Information regime | The policy: who may see the *identity* (colour and rank) of the cards in each kind of zone. A card's existence and slot are always public. | Ontology section 7, loaded as `Regime` (`ontology.py`). |
 | 3. Common knowledge | What hints have told each holder about their cards (including negative information). Everyone saw the hints, so it is public. | `CardKnowledge` (`model.py`), updated in `engine._apply_give_hint`; declared public with `hn:visibility`. |
 | 4. A player's view | The truth projected through the regime for one seat. | `PlayerView` (`views.build_view`), rendered as text sections (`states.py`) and, for validation, as an RDF graph (`views.view_graph`). |
 

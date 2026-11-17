@@ -49,7 +49,7 @@ class FakeProvider:
         if model.endswith("chatty"):
             return 200, reply({"content": "Let me think about the best move..."})
         if messages[-1]["role"] == "tool":                       # it has read the state: now act
-            return 200, tool_call("discard_card", {"position": 0}, len(messages))
+            return 200, tool_call("discard_card", {"slot": 0}, len(messages))
         return 200, tool_call("get_state", {"section": "tokens"}, len(messages))
 
 

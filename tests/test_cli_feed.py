@@ -23,7 +23,7 @@ def test_the_log_is_a_plain_json_feed_with_header_events_and_result(tmp_path: Pa
     assert [r["type"] for r in feed[:1]] == ["header"] and feed[-1]["type"] == "result"
     assert {r["type"] for r in feed[1:-1]} == {"event"}
     header = feed[0]
-    assert header["schema"] == 2 and header["seed"] == 3 and header["names"] == ["Alice", "Bob", "Carol"]
+    assert header["schema"] == 3 and header["seed"] == 3 and header["names"] == ["Alice", "Bob", "Carol"]
     assert header["seats"] == {"Alice": "random", "Bob": "random", "Carol": "random"}
     assert len(header["deal"]["hands"]) == 3 and header["deal"]["deck_size"] == 35
     assert all(isinstance(c["color"], str) and isinstance(c["rank"], int) for h in header["deal"]["hands"] for c in h)  # real JSON, no reprs

@@ -115,3 +115,5 @@ matched strings, a rigged deal that correctly failed conservation).
   faulted turn is in the trace; `hanabi-trace` summarises a trace; argument errors say what the tool
   takes. See "What a fault tells you" in `docs/AUDIT.md`. The test count is now 199 (the table above
   is the count at the milestone).
+* Cards are plain `(colour, rank)` values with no id; a hand is a row of **slots** and a vacated slot is
+  refilled in place (`docs/AUDIT.md`: "Cards are values", "Slots"). The test count is now 212.

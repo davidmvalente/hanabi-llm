@@ -68,7 +68,7 @@ class GameState:
     final_turns_left: int | None
     #: Cards placed on the fireworks, in play order.
     played: tuple[Card, ...]
-    #: What hints have told the holder about each card still in a hand: ``knowledge[seat][position]``,
+    #: What hints have told the holder about each card still in a hand: ``knowledge[seat][slot]``,
     #: parallel to ``hands``. It is attached to the slot, so it moves with the card as the hand shifts.
     knowledge: tuple[tuple[CardKnowledge, ...], ...]
     events: tuple[Event, ...]
@@ -86,7 +86,7 @@ class GameState:
 
 
 def hint_targets(hand: Sequence[Card | FoldCard], value: HintValue) -> tuple[int, ...]:
-    """The positions a hint of ``value`` covers: EVERY card of the hand with that colour or rank."""
+    """The slots a hint of ``value`` covers: EVERY card of the hand with that colour or rank."""
     if isinstance(value, Color):
         return tuple(i for i, c in enumerate(hand) if c.color == value)
     return tuple(i for i, c in enumerate(hand) if c.rank == value)
@@ -103,10 +103,10 @@ def _card_in_hand(state: GameState, rules: RuleSet, actor: Seat, action: Action)
     if isinstance(action, GiveHint):
         return
     size = len(state.hands[actor])
-    if not 0 <= action.position < size:
+    if not 0 <= action.slot < size:
         raise IllegalAction(
-            f"position {action.position} is not in your hand. "
-            f"Your hand has {size} cards, positions 0 to {size - 1}."
+            f"slot {action.slot} does not exist. "
+            f"Your hand has {size} cards, in slots 0 to {size - 1}."
         )
 
 
@@ -164,26 +164,29 @@ def _card(fc: FoldCard) -> Card:
     return Card(Color(fc.color), fc.rank)
 
 
-def _draw_event(game: Game, actor: Seat, turn: int) -> list[Event]:
-    """A refill for the actor's hand, if the deck has a card; new cards always go into the LAST slot."""
-    return [DrawEvent(turn, actor, game._deck.pop())] if game._deck else []
+def _draw_event(game: Game, actor: Seat, turn: int, slot: int) -> list[Event]:
+    """The refill of ``slot``, the slot the played or discarded card just left, if the deck has a card.
+
+    A slot is refilled IN PLACE, so the other slots do not move. When the deck is empty there is no draw,
+    and the vacated slot is simply removed (the later slots shift down by one)."""
+    return [DrawEvent(turn, actor, game._deck.pop(), slot)] if game._deck else []
 
 
 @bind("decide_play_card")
 def _decide_play_card(game: Game, actor: Seat, action: Action) -> list[Event]:
     assert isinstance(action, PlayCard)
     fold = game._fold
-    card = _card(fold.hands[actor][action.position])
+    card = _card(fold.hands[actor][action.slot])
     success = is_playable(fold, card.color, card.rank)  # the rule "play_is_legal_or_misfire"
-    return [PlayEvent(fold.turn, actor, action.position, card, success), *_draw_event(game, actor, fold.turn)]
+    return [PlayEvent(fold.turn, actor, action.slot, card, success), *_draw_event(game, actor, fold.turn, action.slot)]
 
 
 @bind("decide_discard_card")
 def _decide_discard_card(game: Game, actor: Seat, action: Action) -> list[Event]:
     assert isinstance(action, DiscardCard)
     fold = game._fold
-    card = _card(fold.hands[actor][action.position])
-    return [DiscardEvent(fold.turn, actor, action.position, card), *_draw_event(game, actor, fold.turn)]
+    card = _card(fold.hands[actor][action.slot])
+    return [DiscardEvent(fold.turn, actor, action.slot, card), *_draw_event(game, actor, fold.turn, action.slot)]
 
 
 @bind("decide_give_hint")
@@ -287,7 +290,7 @@ class Game:
 
         This bypasses the rules, so it can create positions the rules never would (for
         example hands that do not add up to a real deck); the SHACL audit rejects those.
-        The top of ``deck`` is its last element. ``knowledge`` maps (seat, position) to what that hand
+        The top of ``deck`` is its last element. ``knowledge`` maps (seat, slot) to what that hand
         slot has been told.
         """
         f = self._fold
@@ -303,8 +306,8 @@ class Game:
         if fuses is not None:
             f.fuses = fuses
         if knowledge:
-            for (seat, position), k in knowledge.items():
-                c = f.hands[seat][position]
+            for (seat, slot), k in knowledge.items():
+                c = f.hands[seat][slot]
                 c.known_color, c.known_rank = (k.color.value if k.color else None), k.rank
                 c.not_colors, c.not_ranks = [x.value for x in k.not_colors], list(k.not_ranks)
         self._snapshot = None
@@ -317,9 +320,9 @@ class Game:
         if self.is_over or actor != st.current:
             return []
         actions: list[Action] = []
-        for pos in range(len(st.hands[actor])):
-            actions.append(PlayCard(pos))
-            actions.append(DiscardCard(pos))
+        for slot in range(len(st.hands[actor])):
+            actions.append(PlayCard(slot))
+            actions.append(DiscardCard(slot))
         if st.hints > 0:
             for receiver, hand in enumerate(st.hands):
                 if receiver == actor:

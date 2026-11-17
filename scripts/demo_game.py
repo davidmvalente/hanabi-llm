@@ -24,7 +24,7 @@ class Heuristic:
         for cv in v.hands[me]:                                   # 1. a card I know is playable
             k = cv.knowledge
             if k.color and k.rank and v.stacks[k.color] == k.rank - 1:
-                return TurnResult(PlayCard(cv.position))
+                return TurnResult(PlayCard(cv.slot))
         if v.hints > 0:                                          # 2. help a teammate play
             for seat, hand in enumerate(v.hands):
                 if seat == me: continue

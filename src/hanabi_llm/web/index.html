@@ -46,7 +46,7 @@
   .hand:first-child { border-top: 0; }
   .who { min-width: 130px; font-weight: 600; } .who small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; word-break: break-all; }
   .cards { display: flex; flex-wrap: wrap; gap: 8px; }
-  .card { text-align: center; width: 64px; } .card .pos { font-size: 11px; color: var(--muted); }
+  .card { text-align: center; width: 64px; } .card .slot { font-size: 11px; color: var(--muted); }
   .card .know { font-size: 11px; color: var(--muted); min-height: 2.6em; line-height: 1.25; overflow-wrap: anywhere; }
   .hidden-hand { font-size: 12px; color: var(--muted); font-style: italic; }
   #log { height: 13rem; overflow-y: auto; font-size: 14px; display: grid; align-content: start; gap: 2px; }
@@ -86,7 +86,7 @@
     <button id="first" aria-label="First">⏮</button><button id="prev" aria-label="Previous">◀</button>
     <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Move through the game">
     <button id="next" aria-label="Next">▶</button><button id="last" aria-label="Latest">⏭</button>
-    <span id="pos" class="label"></span>
+    <span id="frame" class="label"></span>
     <label><input id="follow" type="checkbox" checked> follow live</label>
   </div>
 </div>
@@ -164,9 +164,9 @@ function drawHands(s, header) {
     const w = el("div", "who"); w.append(el("span", "", (s.current === seat && !s.over_reason ? "▶ " : "") + name, { color: playerColor(seat) }));
     w.append(el("small", "", header.seats?.[name] ?? ""));
     const cards = el("div", "cards");
-    hand.forEach((c, pos) => {
+    hand.forEach((c, slot) => {
       const card = el("div", "card");
-      card.append(el("div", "pos", pos), hidden || c.color === null ? backTile(c) : tile(c.color, c.rank), el("div", "know", knows(c)));
+      card.append(el("div", "slot", slot), hidden || c.color === null ? backTile(c) : tile(c.color, c.rank), el("div", "know", knows(c)));
       cards.append(card);
     });
     row.append(w, cards);
@@ -221,7 +221,7 @@ function syncControls() {
   scrub.max = last; scrub.value = k;
   $("first").disabled = $("prev").disabled = k <= 0;
   $("next").disabled = $("last").disabled = k >= last;
-  $("pos").textContent = `${k}/${last}`;
+  $("frame").textContent = `${k}/${last}`;
   $("follow").checked = follow;
 }
 

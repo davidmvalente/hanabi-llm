@@ -30,8 +30,13 @@ if TYPE_CHECKING:
     from .engine import Game
     from .runner import GameResult
 
-SCHEMA = 2  # 2: cards are {color, rank} with no id; a hidden card is null
+SCHEMA = 3  # 3: a hand index is a `slot` and a draw says which slot it refills; 2: cards are {color, rank}, hidden = null
 Record = dict[str, Any]
+
+
+def event_slot(rec: Record) -> int:
+    """The slot a play or discard event is about (feeds before schema 3 called it ``position``)."""
+    return int(rec["slot"] if "slot" in rec else rec["position"])
 
 
 def card_record(card: Card | None) -> Record | None:
@@ -47,12 +52,12 @@ def event_record(ev: Event) -> Record:
         return base | {"kind": "hint", "actor": ev.actor, "receiver": ev.receiver, "attribute": ev.attribute,
                        "value": value, "targets": list(ev.targets)}
     if isinstance(ev, PlayEvent):
-        return base | {"kind": "play", "actor": ev.actor, "position": ev.position,
+        return base | {"kind": "play", "actor": ev.actor, "slot": ev.slot,
                        "card": card_record(ev.card), "success": ev.success}
     if isinstance(ev, DiscardEvent):
-        return base | {"kind": "discard", "actor": ev.actor, "position": ev.position, "card": card_record(ev.card)}
+        return base | {"kind": "discard", "actor": ev.actor, "slot": ev.slot, "card": card_record(ev.card)}
     if isinstance(ev, DrawEvent):
-        return base | {"kind": "draw", "actor": ev.actor, "card": card_record(ev.card)}
+        return base | {"kind": "draw", "actor": ev.actor, "card": card_record(ev.card), "slot": ev.slot}
     assert isinstance(ev, EndEvent)
     return base | {"kind": "end", "reason": ev.reason, "score": ev.score}
 
@@ -62,7 +67,7 @@ def action_record(action: Action) -> Record:
     if isinstance(action, GiveHint):
         value = action.value.value if isinstance(action.value, Color) else action.value
         return {"tool": action.affordance, "receiver": action.receiver, "attribute": action.attribute, "value": value}
-    return {"tool": action.affordance, "position": action.position}
+    return {"tool": action.affordance, "slot": action.slot}
 
 
 def header_record(game: Game, seats: dict[str, str], config: dict[str, Any]) -> Record:

@@ -61,7 +61,7 @@ def test_there_are_no_card_ids_and_the_deck_is_shuffled() -> None:
     from hanabi_llm.views import CardView
 
     assert [f.name for f in dataclasses.fields(Card)] == ["color", "rank"]                    # a card is a (colour, rank) value
-    assert [f.name for f in dataclasses.fields(CardView)] == ["position", "card", "knowledge"]  # a view names a slot, not a card
+    assert [f.name for f in dataclasses.fields(CardView)] == ["slot", "card", "knowledge"]  # a view names a slot, not a card
     orders = set()
     for seed in range(10):
         deck = list(Game(["Ann", "Bob"], seed=seed).state.deck)
@@ -79,18 +79,6 @@ def test_cards_are_values_two_copies_are_equal_and_a_card_is_validated() -> None
     for bad in ((B, 0), (B, -1), (B, True), ("blue", 1), (None, 1)):
         with pytest.raises(ValueError):
             Card(*bad)  # type: ignore[arg-type]
-
-
-def test_knowledge_is_attached_to_the_slot_so_it_moves_with_the_hand() -> None:
-    """Hints are about slots; when a card leaves, the cards after it (and what was told about them) shift down."""
-    game = Game(["Ann", "Bob"], seed=2)
-    rig(game, [[(R, 1)] * 5, [(B, 1), (G, 2), (R, 3), (Y, 4), (W, 5)]], deck=[(Y, 1)] * 5)
-    game.apply(0, GiveHint(1, R))                                     # Bob's red 3 (slot 2) is now known to be red
-    assert [k.color for k in game.state.knowledge[1]] == [None, None, R, None, None]
-    game.apply(1, DiscardCard(0))                                      # Bob discards slot 0: the red 3 slides to slot 1
-    assert [str(c) for c in game.state.hands[1]][:2] == ["green 2", "red 3"]
-    assert [k.color for k in game.state.knowledge[1]] == [None, R, None, None, None]   # the knowledge moved with it
-    assert len(game.state.knowledge) == len(game.state.hands) and all(len(k) == len(h) for k, h in zip(game.state.knowledge, game.state.hands, strict=True))
 
 
 def test_no_graph_node_is_named_by_a_card_id() -> None:

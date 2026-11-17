@@ -68,13 +68,13 @@ class CardKnowledge:
 @dataclass(frozen=True, slots=True)
 class PlayCard:
     affordance: ClassVar[str] = "play_card"
-    position: int
+    slot: int
 
 
 @dataclass(frozen=True, slots=True)
 class DiscardCard:
     affordance: ClassVar[str] = "discard_card"
-    position: int
+    slot: int
 
 
 #: What a hint names: a colour (``Color``) or a rank (``int``). The two kinds are disjoint,
@@ -117,7 +117,7 @@ Action = PlayCard | DiscardCard | GiveHint
 class PlayEvent:
     turn: int
     actor: Seat
-    position: int
+    slot: int
     card: Card
     success: bool
 
@@ -126,7 +126,7 @@ class PlayEvent:
 class DiscardEvent:
     turn: int
     actor: Seat
-    position: int
+    slot: int
     card: Card
 
 
@@ -134,7 +134,7 @@ class DiscardEvent:
 class HintEvent:
     """``actor`` told ``receiver`` that the cards at ``targets`` are ``value`` (and the rest are not).
 
-    ``targets`` is the subset of the receiver's hand the hint covers, as positions
+    ``targets`` is the subset of the receiver's hand the hint covers, as slots
     at the moment of the hint: exactly the cards that have ``value``, no more, no fewer.
     """
 
@@ -151,7 +151,7 @@ class HintEvent:
 
 @dataclass(frozen=True, slots=True)
 class DrawEvent:
-    """``actor`` drew ``card`` into their last slot.
+    """``actor`` drew ``card`` into ``slot``: the slot the card just played or discarded left.
 
     ``card`` is ``None`` where the viewer may not see it (a player's own draw): the draw
     happened, the identity is hidden.
@@ -160,6 +160,7 @@ class DrawEvent:
     turn: int
     actor: Seat
     card: Card | None
+    slot: int
 
 
 @dataclass(frozen=True, slots=True)

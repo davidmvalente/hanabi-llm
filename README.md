@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 199 tests, no network needed
+uv run pytest                       # 212 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -73,8 +73,8 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   `get_concepts` tool so that arms can be compared; the choice is logged in the feed header.
   `--api-url` points the same pipeline at any OpenAI-compatible endpoint.
 * **Events read as sentences, with the card's colour in the text:** `T7 Alice hinted Carol:
-  position 3 is green`, `T8 Bob discarded blue 1 from position 1`, `T10 Alice played blue 2 from
-  position 2 -> misfire (fuse lost)`. One definition (`narrate.py`) serves the prompt history, the
+  slot 3 is green`, `T8 Bob discarded blue 1 from slot 1 and drew red 2 into slot 1`, `T10 Alice played
+  blue 2 from slot 2 -> misfire (fuse lost)`. One definition (`narrate.py`) serves the prompt history, the
   CLI and the viewer.
 * **A hint is one value.** `give_hint(player, hint)`, where `hint` is a colour or a rank; the
   attribute follows from the value, so "both" or "neither" cannot be written. The hint always
@@ -107,8 +107,10 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 
 ## Conventions worth knowing
 
-* Hand positions are 0-based. A played or discarded card leaves a gap that
-  closes (later cards shift down one); the replacement enters at the last slot.
+* A hand is a row of **slots**, numbered from 0. A played or discarded card is replaced from the deck
+  **in the same slot**, so the other slots never move and what you were told about a slot stays valid.
+  Only when the deck is empty is there nothing to refill with: the slot is removed and the later slots
+  shift down by one.
 * Hint knowledge includes negative information (a colour hint that skipped a
   card tells its holder the card is not that colour).
 * Losing all fuses ends the game; `official_score` is 0 in that case,

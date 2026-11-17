@@ -19,14 +19,14 @@ def tool(cid: str, content: str) -> dict:  # type: ignore[type-arg]
 
 
 ROWS = [
-    {"turn": 1, "player": "Alice", "action": {"tool": "discard_card", "position": 0}, "tokens": [100, 10], "messages": [
+    {"turn": 1, "player": "Alice", "action": {"tool": "discard_card", "slot": 0}, "tokens": [100, 10], "messages": [
         assistant(("c1", "get_state", "{}")), tool("c1", "## turn ..."),
-        assistant(("c2", "discard_card", '{"position": 0}')), tool("c2", "Accepted: discard_card. Your turn is over.")]},
-    {"turn": 3, "player": "Carol", "action": {"tool": "play_card", "position": 2}, "tokens": [300, 40], "messages": [
-        assistant(("c1", "play_card", '{"position": 9}')), tool("c1", "Error: position 9 is not in your hand. Your hand has 5 cards, positions 0 to 4."),
+        assistant(("c2", "discard_card", '{"slot": 0}')), tool("c2", "Accepted: discard_card. Your turn is over.")]},
+    {"turn": 3, "player": "Carol", "action": {"tool": "play_card", "slot": 2}, "tokens": [300, 40], "messages": [
+        assistant(("c1", "play_card", '{"slot": 9}')), tool("c1", "Error: slot 9 does not exist. Your hand has 5 cards, in slots 0 to 4."),
         assistant(content="Hmm, let me reconsider."),
         assistant(("c2", "explain_rules", '{"topic": "nope"}')), tool("c2", "Error: Unknown topic 'nope'."),
-        assistant(("c3", "play_card", '{"position": 2}')), tool("c3", "Accepted: play_card. Your turn is over.")]},
+        assistant(("c3", "play_card", '{"slot": 2}')), tool("c3", "Accepted: play_card. Your turn is over.")]},
     {"turn": 9, "player": "Carol", "action": None, "tokens": None, "fault": {"kind": "invalid_actions", "detail": "5 rejected action attempts in one turn: ..."},
      "messages": [assistant(("c1", "give_hint", '{"player": "Carol", "hint": "red"}')), tool("c1", "Error: You cannot give a hint to yourself.")]},
 ]
@@ -44,7 +44,7 @@ def test_the_counts_per_player() -> None:
 def test_every_rejection_is_listed_in_words_in_order() -> None:
     _, incidents = summarise(ROWS)
     assert [(i.turn, i.player) for i in incidents] == [(3, "Carol"), (3, "Carol"), (9, "Carol")]
-    assert incidents[0].text.startswith('play_card({"position": 9}) -> Error: position 9 is not in your hand')
+    assert incidents[0].text.startswith('play_card({"slot": 9}) -> Error: slot 9 does not exist')
     assert incidents[1].text == 'no tool call, it said: "Hmm, let me reconsider."'
     assert 'give_hint({"player": "Carol", "hint": "red"})' in incidents[2].text and "cannot give a hint to yourself" in incidents[2].text
 

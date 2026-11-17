@@ -18,9 +18,9 @@ logged game says which arm it belongs to.
 A Turtle file in `src/hanabi_llm/knowledge/`, made of `hn:Concept` nodes:
 
 ```turtle
-hn:HandShift a hn:Concept ; hn:category "mechanic" ; hn:conceptName "hand_shift" ;
-    hn:summary  "Positions are 0-based; later cards slide down when a card leaves." ;
-    hn:guidance "Track positions after every play or discard." .
+hn:StableSlots a hn:Concept ; hn:category "mechanic" ; hn:conceptName "stable_slots" ;
+    hn:summary  "Slots are 0-based and stay put: a played card is replaced in the same slot." ;
+    hn:guidance "What a hint told you about slot 2 is still true of slot 2 until you play or discard it." .
 ```
 
 * `hn:category` is free text, used only to group the notes in the overview.
