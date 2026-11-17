@@ -17,6 +17,7 @@ from typing import Protocol
 from .engine import Game
 from .faults import FaultKind, PlayerFault
 from .llm import JSON, ChatClient, Completion, LLMError
+from .prompt import PromptSpec, load_prompt
 from .model import Action, Seat
 from .tools import ToolBox
 from .states import state_text
@@ -58,39 +59,6 @@ class RandomPlayer:
         return TurnResult(self._rng.choice(ctx.legal))
 
 
-def _tool_lines(game: Game, max_calls: int) -> str:
-    """Describe the tool families from the ontology, so the prompt cannot drift."""
-    by_family: dict[str, list[str]] = {}
-    for name, spec in sorted(game.ontology.affordances.items()):
-        by_family.setdefault(spec.family, []).append(name)
-    free = ", ".join(by_family["state"] + by_family["rules"])
-    return (f"Free tools, usable as often as you like (up to {max_calls} model calls per turn in total): {free}. "
-            f"The current state is also given to you at the start of every turn. "
-            f"Action tools: {', '.join(sorted(by_family['action']))}.")
-
-
-def build_system_prompt(game: Game, seat: Seat, *, max_calls: int, max_failed_actions: int) -> str:
-    """Rules text comes from the ontology, so prompt and engine cannot disagree."""
-    rules = game.rules
-    names = game.state.names
-    rule_lines = "\n".join(f"- {t}" for t in rules.rule_texts)
-    return f"""You are {names[seat]}, one of {len(names)} players ({', '.join(names)}) in a cooperative game of Hanabi.
-
-GOAL: together, build five fireworks (colours: {', '.join(c.value for c in rules.colors)}), each from rank 1 up to {rules.top_rank} in order. Score = total cards placed (max {len(rules.colors) * rules.top_rank}).
-
-The twist: you can see everyone's cards EXCEPT YOUR OWN. The only communication allowed is the `give_hint` action. Any text you write besides tool calls is NOT seen by anyone.
-
-Deck: each colour has {', '.join(f'{n}x rank {r}' for r, n in sorted(rules.copies_by_rank.items()))}. Hint tokens: {rules.initial_hints} to start, capacity {rules.max_hints}. Fuse tokens: {rules.initial_fuses}.
-
-Rules:
-{rule_lines}
-
-HOW A TURN WORKS
-1. {_tool_lines(game, max_calls)}
-2. Your turn ends the moment you call exactly ONE action tool that is accepted. After that, the next player moves.
-3. A rejected action returns an error and you may try again. If you make {max_failed_actions} rejected action attempts in one turn, or never take an action within the call budget, the game is aborted and counted as your fault."""
-
-
 class LLMPlayer:
     """Plays through any ``ChatClient`` using the tool-calling loop."""
 
@@ -101,6 +69,7 @@ class LLMPlayer:
         game: Game,
         seat: Seat,
         *,
+        prompt: PromptSpec | None = None,
         max_calls: int = 8,
         max_failed_actions: int = 3,
     ) -> None:
@@ -109,7 +78,13 @@ class LLMPlayer:
         self._max_calls = max_calls
         self._max_failed = max_failed_actions
         self._rules = game.rules
-        self._system = build_system_prompt(game, seat, max_calls=max_calls, max_failed_actions=max_failed_actions)
+        self.prompt = prompt or load_prompt()  # latest version unless one is given
+        self._system = self.prompt.render(
+            name=game.state.names[seat],
+            players=", ".join(game.state.names),
+            max_calls=max_calls,
+            max_failed_actions=max_failed_actions,
+        )
 
     async def take_turn(self, ctx: TurnContext) -> TurnResult:
         trace: list[JSON] = []

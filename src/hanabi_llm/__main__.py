@@ -22,6 +22,7 @@ from .engine import Game
 from .faults import GameStatus
 from .llm import OpenRouterClient
 from .players import LLMPlayer, Player, RandomPlayer
+from .prompt import load_prompt
 from .runner import GameResult, TurnTrace, play_game
 
 #: Neutral seat names. NEVER derive them from model ids: a model that can see
@@ -55,11 +56,12 @@ async def run(args: argparse.Namespace) -> GameResult:
     seed = args.seed if args.seed is not None else secrets.randbelow(2**31)
     names = list(SEAT_NAMES[: len(models)])
     game = Game(names, seed=seed)
+    prompt = load_prompt(args.prompt)
     log = args.log.open("w") if args.log else None
 
     config = {
         "seed": seed, "seats": dict(zip(names, models, strict=True)), "temperature": args.temperature,
-        "max_tokens": args.max_tokens, "max_calls": args.max_calls, "max_failed_actions": args.max_failed_actions,
+        "max_tokens": args.max_tokens, "prompt": {"version": prompt.version, "sha256": prompt.sha256}, "max_calls": args.max_calls, "max_failed_actions": args.max_failed_actions,
     }
     _write(log, {"type": "header", **config})
 
@@ -75,7 +77,7 @@ async def run(args: argparse.Namespace) -> GameResult:
                 players.append(RandomPlayer(name, seed=seed + seat))
             else:
                 client = OpenRouterClient(model, api_key, http, temperature=args.temperature, max_tokens=args.max_tokens)
-                players.append(LLMPlayer(name, client, game, seat, max_calls=args.max_calls,
+                players.append(LLMPlayer(name, client, game, seat, prompt=prompt, max_calls=args.max_calls,
                                          max_failed_actions=args.max_failed_actions))
         result = await play_game(game, players, on_turn=on_turn, turn_timeout=args.turn_timeout)
     _write(log, {"type": "result", "status": result.status, "score": result.score, "official_score": result.official_score,
@@ -92,6 +94,7 @@ def main() -> None:
     ap.add_argument("--log", type=Path, default=None, help="write a JSONL transcript here")
     ap.add_argument("--max-calls", type=int, default=8, help="model calls allowed per turn")
     ap.add_argument("--max-failed-actions", type=int, default=3, help="rejected actions per turn before a model fault")
+    ap.add_argument("--prompt", default=None, help="system prompt version, e.g. v1 (default: latest)")
     ap.add_argument("--temperature", type=float, default=0.3)
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--turn-timeout", type=float, default=300.0, help="safety net in seconds; trips as an INFRA fault")

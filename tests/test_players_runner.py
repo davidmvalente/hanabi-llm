@@ -63,14 +63,13 @@ async def test_reads_are_free_then_one_action_ends_turn() -> None:
     assert "## tokens" in json.dumps(client.seen[1])  # the state tool's answer went back to the model
 
 
-async def test_first_message_carries_the_whole_state_and_the_prompt_names_the_tools() -> None:
+async def test_first_message_carries_the_whole_state() -> None:
     game = rigged()
     client = ScriptedClient([call("discard_card", {"position": 0})])
     await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
     system, user = client.seen[0][0]["content"], client.seen[0][1]["content"]
     assert user.count("## ") == 6 and "Choose your action now." in user
-    for tool in ("get_state", "explain_rules", "play_card", "discard_card", "give_hint"):
-        assert tool in system
+    assert system.startswith("You are Ann.") and "Ann, Bob" in system
 
 
 async def test_read_tool_mistakes_never_disqualify() -> None:
@@ -207,10 +206,9 @@ def test_seat_names_are_neutral() -> None:
 
 def test_system_prompt_is_identical_across_seats_except_the_name() -> None:
     game = Game(["Ann", "Bob"], seed=1)
-    p0 = LLMPlayer("Ann", ScriptedClient([]), game, 0)._system.replace("Ann", "X")
-    p1 = LLMPlayer("Bob", ScriptedClient([]), game, 1)._system.replace("Bob", "X")
-    # the two players' names appear in a different order in the roster line; compare the rest
-    assert p0.split("\n", 1)[1] == p1.split("\n", 1)[1]
+    p0 = LLMPlayer("Ann", ScriptedClient([]), game, 0)._system
+    p1 = LLMPlayer("Bob", ScriptedClient([]), game, 1)._system
+    assert p0.replace("You are Ann.", "You are X.") == p1.replace("You are Bob.", "You are X.")
 
 
 # --- OpenRouter client -----------------------------------------------------

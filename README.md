@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 79 tests, no network needed
+uv run pytest                       # 91 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -28,6 +28,7 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 | `explain.py` | Rule and action explanations, generated from the ontology |
 | `faults.py` | Who is to blame when a game cannot finish (model vs infrastructure) |
 | `llm.py` | Async OpenRouter client (retries, typed result) |
+| `prompt.py`, `prompts/system.v1.yaml` | The system prompt: versioned YAML, a few run-setting variables, nothing read from the graph |
 | `players.py` | `LLMPlayer` (tool loop for one turn), `RandomPlayer` |
 | `runner.py` | Referee loop: only write path to the engine; aborts (never patches) on faults |
 
@@ -54,6 +55,12 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   ends the turn), *state* (`get_state`, optionally one `section`) and *rules*
   (`explain_rules`, optionally one `topic`: an action or a rule, with its
   rationale and an example). Read tools are free within a per-turn call budget.
+* **The system prompt is a versioned YAML file** (`prompts/system.v1.yaml`):
+  objective and turn protocol only, with four placeholders (`name`, `players`,
+  `max_calls`, `max_failed_actions`). It states no rules, constants or tool
+  lists: models learn those through `explain_rules` and `get_state`. Released
+  versions are never edited; add `system.v2.yaml` instead. The version and
+  sha256 go in every log header (`--prompt v1`).
 * **One vocabulary for tokens.** Hint and fuse tokens are both a pool with
   `available`, `spent` and `capacity`, where `spent = capacity - available`;
   refunds just raise `available`.

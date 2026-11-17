@@ -19,11 +19,12 @@ tournament layer.
 | 9 | **Games were not reproducible.** Seed optional, not logged, no action log. | Medium | Seed always chosen and logged; `GameResult.action_log` + seed replays a game exactly. | `test_action_log_and_seed_replay_exactly` |
 | 10 | **Sampling limits uncontrolled.** Temperature and output length were implicit. | Low | `--temperature`, `--max-tokens`, budgets are identical for all seats and written to the log header. | n/a |
 | 11 | **Transcript could be lost on a crash.** | Low | Log is flushed after every record; a final `result` record carries status, blame and `counts_for_ranking`. | n/a |
-| 12 | **Opinionated strategy text in the system prompt.** Fine if identical for all, but it duplicates the new concept notes. | Low | Prompt now states only rules and turn structure; strategy lives in `get_concepts`. | n/a |
+| 12 | **The system prompt restated the rules** (read from the ontology), duplicating `explain_rules` and putting the same information through two channels. | Low | The prompt is a versioned YAML with objective and turn protocol only; rules are learned through the tools. Version and hash are logged. | `test_nothing_is_read_from_the_graph`, `test_every_tool_name_in_the_prompt_exists` |
 
 ## Fairness policy as implemented
 
-* Every seat gets the same system prompt (apart from its own name), the same
+* Every seat gets the same system prompt (apart from its own name; a versioned
+  YAML whose version and hash are logged), the same
   tools, the same call budget and the same sampling limits.
 * A game ends in exactly one of: `completed`, `aborted_model_fault`,
   `aborted_infra_fault`. Only `completed` has an official score.
