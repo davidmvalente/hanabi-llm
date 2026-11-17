@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 188 tests, no network needed
+uv run pytest                       # 199 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -86,8 +86,9 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   model conversations separately. Watch a game live or afterwards:
 
   ```bash
-  uv run hanabi-llm --models random,random,random --seed 3 --log game.jsonl &
+  uv run hanabi-llm --models random,random,random --seed 3 --log game.jsonl --trace trace.jsonl &
   uv run hanabi-view game.jsonl            # open http://127.0.0.1:8765
+  uv run hanabi-trace trace.jsonl          # what each model did, and exactly what was rejected
   ```
 
   Everything is visible by default; "Blind a hand" turns one player's cards face-down so you see

@@ -11,6 +11,7 @@ A player either returns a valid action or raises ``PlayerFault``; there is no
 from __future__ import annotations
 
 import random
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -59,6 +60,16 @@ class RandomPlayer:
         return TurnResult(self._rng.choice(ctx.legal))
 
 
+#: Rejected action attempts allowed in one turn before the seat is at fault. Small models need room to recover.
+DEFAULT_MAX_FAILED_ACTIONS = 5
+
+
+def _brief(text: str, limit: int) -> str:
+    """One line, trimmed: enough to see what happened without flooding the console."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
 class LLMPlayer:
     """Plays through any ``ChatClient`` using the tool-calling loop."""
 
@@ -71,7 +82,7 @@ class LLMPlayer:
         *,
         prompt: PromptSpec | None = None,
         max_calls: int = 8,
-        max_failed_actions: int = 3,
+        max_failed_actions: int = DEFAULT_MAX_FAILED_ACTIONS,
     ) -> None:
         self.name = name
         self._client = client
@@ -89,6 +100,8 @@ class LLMPlayer:
     async def take_turn(self, ctx: TurnContext) -> TurnResult:
         trace: list[JSON] = []
         ptok = ctok = failed = 0
+        attempts: list[str] = []          # what was rejected, in words, for the fault message
+        tools_called: Counter[str] = Counter()
         messages: list[JSON] = [
             {"role": "system", "content": self._system},
             {"role": "user", "content": state_text(ctx.view, self._rules) + "\n\nChoose your action now."},
@@ -109,11 +122,14 @@ class LLMPlayer:
 
             if not completion.tool_calls:
                 failed += 1
+                said = _brief(completion.content or "", 100)
+                attempts.append(f'no tool call, it said: "{said}"' if said else "no tool call and an empty reply")
                 nudge: JSON = {"role": "user", "content": "Call a tool. To end your turn use exactly one of play_card, discard_card or give_hint."}
                 messages.append(nudge)
                 trace.append(nudge)
             for call in completion.tool_calls:
                 outcome = ctx.toolbox.execute(call.name, call.arguments)
+                tools_called[call.name] += 1
                 tool_msg: JSON = {"role": "tool", "tool_call_id": call.id, "content": outcome.text}
                 messages.append(tool_msg)
                 trace.append(tool_msg)
@@ -121,6 +137,9 @@ class LLMPlayer:
                     return TurnResult(outcome.action, trace, ptok, ctok)  # first valid action ends the turn
                 if outcome.failed_action:
                     failed += 1
+                    attempts.append(f"{call.name}({_brief(call.arguments, 80)}) -> {_brief(outcome.text, 140)}")
             if failed >= self._max_failed:
-                raise PlayerFault(FaultKind.INVALID_ACTIONS, f"{failed} rejected action attempts in one turn", trace)
-        raise PlayerFault(FaultKind.NO_ACTION, f"no action taken within {self._max_calls} model calls", trace)
+                raise PlayerFault(FaultKind.INVALID_ACTIONS, f"{failed} rejected action attempts in one turn: " + " | ".join(attempts), trace)
+        used = ", ".join(f"{n} x{c}" for n, c in tools_called.most_common()) or "no tools"
+        extra = f"; rejected: {' | '.join(attempts)}" if attempts else ""
+        raise PlayerFault(FaultKind.NO_ACTION, f"no action taken within {self._max_calls} model calls (it called: {used}){extra}", trace)

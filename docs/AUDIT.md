@@ -28,7 +28,8 @@ tournament layer.
   tools, the same call budget and the same sampling limits.
 * A game ends in exactly one of: `completed`, `aborted_model_fault`,
   `aborted_infra_fault`. Only `completed` has an official score.
-* A model that makes 3 rejected action attempts in one turn, or never acts
+* A model that makes 5 rejected action attempts in one turn (`--max-failed-actions`; it was 3 in the
+  first draft, relaxed after a first run with the smallest models), or never acts
   within 8 model calls, is at fault. The default budgets are visible to the
   model in its prompt.
 * When one model faults in a cooperative game, the teammates' game is void
@@ -160,6 +161,27 @@ The tool set is exactly three families, with no overlap and nothing missing:
   tests, passed unchanged in meaning through the refactor.
 * **Scripts** (`scripts/`): a heuristic demo bot and the headless-browser check are now in the repo,
   so the viewer verification can be reproduced.
+
+## What a fault tells you (after the first run with real models)
+
+A first run with the three smallest tool-calling models ended with "Carol: 3 rejected action attempts"
+and no way to see what they were: the CLI wrote only completed turns to the trace, and the fault said
+only how many. Fixed:
+
+* **The fault names every rejected attempt**, in order, with the tool, its arguments and the error
+  the model was given, and says when a reply had no tool call (with what it said):
+  `5 rejected action attempts in one turn: play_card({"position": 7}) -> Error: position 7 is not in
+  your hand ... | no tool call, it said: "I will play the green card..." | give_hint({"player": "Carol",
+  ...}) -> Error: You cannot give a hint to yourself. | ...`. Running out of calls says which tools
+  were used. The same text is in the console, the feed's result record and the viewer.
+* **The faulted turn is written to the trace** with its whole conversation, like any other turn.
+* **`hanabi-trace trace.jsonl`** summarises a trace: per player the calls, tools used, replies without
+  a tool call, rejected actions and tokens, then every rejected attempt in words.
+* **Argument errors teach.** A call with the wrong argument names (for example an older tool shape,
+  `target`/`color`) used to get "Unknown player None". It now says `give_hint: unexpected argument(s)
+  ['color', 'target'] and missing required argument(s) ['hint', 'player']. It takes: hint (required),
+  player (required).` Mistakes in read tools stay free.
+* **The budget is 5** rejected actions per turn (the prompt tells the model the number).
 
 ## v1.1 plan: token parsimony and caching
 

@@ -108,3 +108,10 @@ matched strings, a rigged deal that correctly failed conservation).
 4. Token parsimony (append-only per-seat threads with deltas).
 5. The `rerankers-version` branch: decision models that score a list of action strings instead of
    calling tools.
+
+## Changes since this milestone
+
+* The rejected-action budget is 5 (was 3), and a fault now says exactly what was rejected; the
+  faulted turn is in the trace; `hanabi-trace` summarises a trace; argument errors say what the tool
+  takes. See "What a fault tells you" in `docs/AUDIT.md`. The test count is now 199 (the table above
+  is the count at the milestone).

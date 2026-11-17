@@ -214,6 +214,18 @@ class ToolBox:
                        key=lambda s: (self._FAMILY_ORDER.index(s.family), s.function_name))
         return [tool_schema(s, self._schema_ctx) for s in specs]
 
+    @staticmethod
+    def _check_arguments(spec: AffordanceSpec, args: JSON) -> None:
+        """Say exactly which arguments are wrong and what the tool takes, so a model can fix the call."""
+        allowed = {p.name for p in spec.params}
+        extra = sorted(set(args) - allowed)
+        missing = sorted(p.name for p in spec.params if not p.optional and p.name not in args)
+        if not extra and not missing:
+            return
+        problems = ([f"unexpected argument(s) {extra}"] if extra else []) + ([f"missing required argument(s) {missing}"] if missing else [])
+        takes = ", ".join(f"{p.name} ({'optional' if p.optional else 'required'})" for p in spec.params) or "no arguments"
+        raise IllegalAction(f"{spec.function_name}: {' and '.join(problems)}. It takes: {takes}.")
+
     def execute(self, name: str, raw_args: str | JSON) -> ToolOutcome:
         """Run one tool call. Never raises: errors become ``is_error`` outcomes."""
         spec = self._game.ontology.affordances.get(name)
@@ -222,6 +234,7 @@ class ToolBox:
             args = _parse_args(raw_args)
             if spec is None:
                 raise IllegalAction(f"Unknown tool {name!r}. Available: {sorted(self._game.ontology.affordances)}")
+            self._check_arguments(spec, args)
             if spec.ends_turn:
                 action = build_action(self._game, name, args)
                 self._game.check(self._ctx.seat, action)  # may raise IllegalAction

@@ -121,3 +121,25 @@ def test_hidden_cards_never_reach_the_model_through_any_read_tool() -> None:
         return [tb.execute(n, a).text for n, a in calls]
 
     assert answers([(R, 1)] * 5, [(Y, 2)] * 10) == answers([(G, 4), (G, 5), (Y, 3), (B, 2), (R, 5)], [(Y, 5)] * 10)
+
+
+def test_wrong_argument_names_get_an_error_that_says_what_the_tool_takes(game2: Game) -> None:
+    """A model that mixes up argument names (say, from an older tool shape) is told how to fix the call."""
+    tb = toolbox(game2)
+    old_shape = tb.execute("give_hint", {"target": "Bob", "color": "red"})
+    assert old_shape.is_error and old_shape.failed_action
+    assert "unexpected argument(s) ['color', 'target']" in old_shape.text and "missing required argument(s) ['hint', 'player']" in old_shape.text
+    assert "It takes: hint (required), player (required)." in old_shape.text
+    half = tb.execute("give_hint", {"player": "Bob"})
+    assert "missing required argument(s) ['hint']" in half.text and "unexpected" not in half.text
+    assert "play_card: missing required argument(s) ['position']" in tb.execute("play_card", {}).text
+    assert "It takes: position (required)." in tb.execute("discard_card", {"pos": 1}).text
+
+
+def test_argument_mistakes_in_read_tools_are_free_and_just_as_clear(game2: Game) -> None:
+    tb = toolbox(game2)
+    out = tb.execute("get_state", {"part": "tokens"})
+    assert out.is_error and not out.failed_action
+    assert "unexpected argument(s) ['part']" in out.text and "It takes: section (optional)." in out.text
+    assert not tb.execute("get_state", {}).is_error and not tb.execute("explain_rules", {}).is_error     # all-optional tools still work bare
+    assert tb.execute("play_card", {"position": 0, "extra": 1}).failed_action                            # extras are refused, not ignored

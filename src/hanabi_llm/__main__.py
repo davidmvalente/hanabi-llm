@@ -28,7 +28,7 @@ from .faults import GameStatus
 from .feed import FeedWriter, action_record, event_record, header_record, result_record
 from .llm import OPENROUTER_URL, OpenRouterClient
 from .ontology import available_knowledge, load_ontology
-from .players import LLMPlayer, Player, RandomPlayer
+from .players import DEFAULT_MAX_FAILED_ACTIONS, LLMPlayer, Player, RandomPlayer
 from .prompt import load_prompt
 from .runner import GameResult, TurnTrace, play_game
 from .views import narrate_event
@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--log", type=Path, default=None, help="write the game feed (JSONL) here; follow it with hanabi-view")
     ap.add_argument("--trace", type=Path, default=None, help="write the model conversations (JSONL) here")
     ap.add_argument("--max-calls", type=int, default=8, help="model calls allowed per turn")
-    ap.add_argument("--max-failed-actions", type=int, default=3, help="rejected actions per turn before a model fault")
+    ap.add_argument("--max-failed-actions", type=int, default=DEFAULT_MAX_FAILED_ACTIONS, help="rejected actions per turn before a model fault")
     ap.add_argument("--knowledge", default="", help=f"comma-separated knowledge graphs to offer ({', '.join(available_knowledge())}); default: none, the baseline")
     ap.add_argument("--api-url", default=OPENROUTER_URL, help="chat-completions endpoint (OpenRouter by default; any OpenAI-compatible server works)")
     ap.add_argument("--prompt", default=None, help="system prompt version, e.g. v1 (default: latest)")
@@ -107,6 +107,11 @@ async def run(args: argparse.Namespace) -> GameResult:
                     players.append(LLMPlayer(name, client, game, seat, prompt=prompt, max_calls=args.max_calls,
                                              max_failed_actions=args.max_failed_actions))
             result = await play_game(game, players, on_turn=on_turn, turn_timeout=args.turn_timeout)
+        if trace and result.fault is not None:
+            # The turn that failed is the one worth reading, so it goes in the trace like any other turn.
+            fault = result.fault
+            trace.write({"turn": fault.turn, "player": fault.player, "action": None, "fault": {"kind": fault.kind.value, "detail": fault.detail},
+                         "messages": list(fault.messages), "tokens": None})
         if feed:
             feed.write(result_record(result))
         return result

@@ -14,7 +14,7 @@ from hanabi_llm.engine import Game
 from hanabi_llm.faults import FaultKind, GameStatus, PlayerFault
 from hanabi_llm.llm import JSON, Completion, LLMError, OpenRouterClient, ToolCall
 from hanabi_llm.model import DiscardCard, GiveHint, PlayCard
-from hanabi_llm.players import LLMPlayer, RandomPlayer, TurnContext, TurnResult
+from hanabi_llm.players import DEFAULT_MAX_FAILED_ACTIONS, LLMPlayer, RandomPlayer, TurnContext, TurnResult
 from hanabi_llm.runner import play_game
 from hanabi_llm.tools import ToolBox
 from hanabi_llm.views import build_view
@@ -81,10 +81,11 @@ async def test_read_tool_mistakes_never_disqualify() -> None:
 
 async def test_rejected_actions_are_a_model_fault() -> None:
     game = rigged()
-    client = ScriptedClient([call("play_card", {"position": 99})] * 3)
+    client = ScriptedClient([call("play_card", {"position": 99})] * DEFAULT_MAX_FAILED_ACTIONS)
     with pytest.raises(PlayerFault) as exc:
         await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
     assert exc.value.kind is FaultKind.INVALID_ACTIONS and exc.value.kind.attributable
+    assert DEFAULT_MAX_FAILED_ACTIONS == 5 and f"{DEFAULT_MAX_FAILED_ACTIONS} rejected action attempts in one turn" in exc.value.detail
 
 
 async def test_recovering_after_one_rejection() -> None:
@@ -95,7 +96,7 @@ async def test_recovering_after_one_rejection() -> None:
 
 async def test_text_only_replies_then_budget_exhaustion() -> None:
     game = rigged()
-    texty = ScriptedClient([Completion("thinking...", ())] * 3)
+    texty = ScriptedClient([Completion("thinking...", ())] * DEFAULT_MAX_FAILED_ACTIONS)
     with pytest.raises(PlayerFault) as e1:
         await LLMPlayer("Ann", texty, game, 0).take_turn(ctx_for(game))
     assert e1.value.kind is FaultKind.INVALID_ACTIONS
@@ -103,6 +104,39 @@ async def test_text_only_replies_then_budget_exhaustion() -> None:
     with pytest.raises(PlayerFault) as e2:
         await LLMPlayer("Ann", readers, game, 0, max_calls=4).take_turn(ctx_for(game))
     assert e2.value.kind is FaultKind.NO_ACTION
+
+
+async def test_a_fault_says_exactly_what_was_rejected_and_why() -> None:
+    """The three things a model can get wrong are each named in the fault, in order, with the error it was given."""
+    game = rigged()
+    client = ScriptedClient([
+        call("play_card", {"position": 99}, "a"),                       # a position it does not have
+        Completion("Let me think about the best move for the team...", ()),   # no tool call at all
+        call("give_hint", {"player": "Ann", "hint": "red"}, "b"),        # a hint to itself
+    ])
+    with pytest.raises(PlayerFault) as exc:
+        await LLMPlayer("Ann", client, game, 0, max_failed_actions=3).take_turn(ctx_for(game))
+    detail = exc.value.detail
+    assert detail.startswith("3 rejected action attempts in one turn: ")
+    parts = detail.split(": ", 1)[1].split(" | ")
+    assert parts[0].startswith('play_card({"position": 99}) -> Error:') and "not in your hand" in parts[0]
+    assert parts[1] == 'no tool call, it said: "Let me think about the best move for the team..."'
+    assert parts[2].startswith("give_hint(") and "cannot give a hint to yourself" in parts[2]
+    assert [m["role"] for m in exc.value.trace][-1] == "tool"                 # and the whole conversation travels with it
+
+
+async def test_running_out_of_calls_says_which_tools_were_used() -> None:
+    game = rigged()
+    readers = ScriptedClient([call("get_state", {}, "1"), call("explain_rules", {}, "2"), call("get_state", {}, "3")])
+    with pytest.raises(PlayerFault) as exc:
+        await LLMPlayer("Ann", readers, game, 0, max_calls=3).take_turn(ctx_for(game))
+    assert exc.value.kind is FaultKind.NO_ACTION and "it called: get_state x2, explain_rules x1" in exc.value.detail
+
+
+def test_the_budget_is_in_the_prompt_the_model_reads() -> None:
+    game = rigged()
+    system = LLMPlayer("Ann", ScriptedClient([]), game, 0)._system
+    assert "After 5 rejected actions in one turn" in system
 
 
 async def test_provider_error_is_not_the_models_fault() -> None:

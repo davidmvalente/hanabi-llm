@@ -142,5 +142,18 @@ def test_a_model_that_never_calls_a_tool_is_at_fault(provider, tmp_path, monkeyp
     assert result.status is GameStatus.ABORTED_MODEL_FAULT and not result.counts_for_ranking
     assert result.fault is not None and result.fault.player == "Bob" and result.fault.kind is FaultKind.INVALID_ACTIONS
     assert result.turns == 1                                            # Alice played her turn before Bob failed his
+    assert len([r for r in fake.requests if r["model"].endswith("chatty")]) == 5       # the budget: 5 attempts, then the fault
     last = read_feed(tmp_path / "g.jsonl")[-1]
     assert last["status"] == "aborted_model_fault" and last["official_score"] is None
+    assert last["fault"]["detail"].count('no tool call, it said: "Let me think about the best move...') == 5   # the feed says what happened
+
+    # the faulted turn is in the trace too, with the whole conversation, so it can be read afterwards
+    rows = [json.loads(line) for line in (tmp_path / "t.jsonl").read_text().splitlines()]
+    assert [r["player"] for r in rows] == ["Alice", "Bob"] and rows[0].get("fault") is None
+    assert rows[1]["fault"]["kind"] == "invalid_actions" and rows[1]["action"] is None
+    assert sum(1 for m in rows[1]["messages"] if m["role"] == "assistant") == 5
+
+    from hanabi_llm.trace_report import format_report
+
+    report = format_report(rows)
+    assert "Bob" in report and report.count("no tool call, it said") == 5 and "FAULT  Bob  T2 invalid_actions" in report
