@@ -2,8 +2,8 @@
 
 Hanabi played by tool-calling language models, refereed by an engine whose rules and tools are
 declared in an RDF ontology, with a full audit trail (a replayable feed, a live viewer) and a
-fairness-first design. This file records what exists at this milestone (git tag `draft-1`), how it
-was tested, and what it deliberately does not do yet.
+fairness-first design. This file records what exists at this milestone (the commit that introduced it,
+on the `first-draft` branch), how it was tested, and what it deliberately does not do yet.
 
 **Status.** 188 automated tests, `mypy --strict` clean, a 23-check headless-browser run, and the
 whole CLI exercised over real HTTP against a local OpenAI-compatible server. **It has never been
