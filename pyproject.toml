@@ -14,6 +14,7 @@ audit = ["pyshacl>=0.26"]   # SHACL audit of games in play (validate.py, --audit
 
 [project.scripts]
 hanabi-llm = "hanabi_llm.__main__:main"
+hanabi-view = "hanabi_llm.viewer:main"
 
 [dependency-groups]
 dev = [

@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 122 tests, no network needed
+uv run pytest                       # 149 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -24,6 +24,8 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 | `engine.py` | Authoritative state, legal-move enumeration, rule enforcement, event log |
 | `views.py` | Per-seat redacted projection -> RDF graph + prompt text (the only place secrets are removed) |
 | `tools.py` | Affordances -> OpenAI-style tool schemas; validates actions; dispatches the read tools |
+| `feed.py`, `fold.py` | The game feed (JSONL), the observer projection, and the reference fold that rebuilds any state from it |
+| `viewer.py`, `web/` | Live viewer: follows a feed and streams folded states to a one-page browser UI |
 | `validate.py`, `shapes/` | Ground-truth graph and SHACL audit: structure, conservation and the epistemic regime, checked on every graph |
 | `states.py` | The state a player may see, as six sections that partition it (turn, tokens, fireworks, discard, hands, history) |
 | `explain.py` | Rule and action explanations, generated from the ontology |
@@ -62,6 +64,22 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   lists: models learn those through `explain_rules` and `get_state`. Released
   versions are never edited; add `system.v2.yaml` instead. The version and
   sha256 go in every log header (`--prompt v1`).
+* **A hint is one value.** `give_hint(player, hint)`, where `hint` is a colour or a rank; the
+  attribute follows from the value, so "both" or "neither" cannot be written. The hint always
+  covers every card of the receiver's hand with that value, so its *targets* are a subset of the
+  hand, and every other card is thereby known not to match. In the feed:
+  `{"kind":"hint","actor":0,"receiver":2,"attribute":"color","value":"green","targets":[3]}`.
+* **The log is a feed, and the viewer follows it.** `--log game.jsonl` writes a header (with the
+  initial deal), one record per event and a result, flushed line by line; `--trace` writes the
+  model conversations separately. Watch a game live or afterwards:
+
+  ```bash
+  uv run hanabi-llm --models random,random,random --seed 3 --log game.jsonl &
+  uv run hanabi-view game.jsonl            # open http://127.0.0.1:8765
+  ```
+
+  Everything is visible by default; "Blind a hand" turns one player's cards face-down so you see
+  what that player sees. Scrub with the slider or the arrow keys; "follow live" tracks the end.
 * **Epistemics is declared once** (ontology section 7: who may see the identity of
   the cards in each zone), interpreted in `views.build_view`, and enforced by SHACL
   shapes and non-interference tests. `docs/EPISTEMICS.md` has the four layers and

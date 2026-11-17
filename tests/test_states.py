@@ -35,7 +35,7 @@ def test_token_pools_use_one_vocabulary(game2: Game) -> None:
     start = text(game2, 0, "tokens")
     assert "Hint tokens: available 8, spent 0, capacity 8." in start
     assert "Fuse tokens: available 3, spent 0, capacity 3." in start
-    game2.apply(0, GiveHint(1, color=B))
+    game2.apply(0, GiveHint(1, B))
     assert "Hint tokens: available 7, spent 1, capacity 8." in text(game2, 0, "tokens")
     game2.apply(1, DiscardCard(0))   # a refund just raises `available`; nothing else to track
     assert "Hint tokens: available 8, spent 0, capacity 8." in text(game2, 0, "tokens")

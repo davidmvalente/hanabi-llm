@@ -26,7 +26,7 @@ def test_own_identities_hidden_others_visible(game2: Game) -> None:
 
 def test_hint_knowledge_is_visible_to_holder(game2: Game) -> None:
     rig(game2, [[(R, 1)] * 5, [(B, 1), (R, 2), (B, 3), (G, 4), (W, 5)]], deck=[(Y, 1)] * 10)
-    game2.apply(0, GiveHint(1, color=B))
+    game2.apply(0, GiveHint(1, B))
     text = state_text(build_view(game2, 1), game2.rules)
     assert "colour=blue" in text
     g = view_graph(game2, build_view(game2, 1))

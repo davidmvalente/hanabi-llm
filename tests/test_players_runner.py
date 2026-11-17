@@ -56,10 +56,10 @@ async def test_reads_are_free_then_one_action_ends_turn() -> None:
     game = rigged()
     client = ScriptedClient([
         call("get_state", {"section": "tokens"}, "a"), call("explain_rules", {"topic": "give_hint"}, "b"),
-        call("give_hint", {"target": "Bob", "rank": 1}, "e"),
+        call("give_hint", {"player": "Bob", "hint": "1"}, "e"),
     ])
     result = await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
-    assert result.action == GiveHint(1, rank=1)
+    assert result.action == GiveHint(1, 1)
     assert "## tokens" in json.dumps(client.seen[1])  # the state tool's answer went back to the model
 
 

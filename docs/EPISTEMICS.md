@@ -57,11 +57,50 @@ Run the SHACL audit on a real game with `uv run hanabi-llm ... --audit`: it vali
 truth and every seat's view after each turn (about 1.3 s per turn for three seats), and a
 violation aborts the run loudly, because it is a bug in this code, not a model's fault.
 
+## Who makes, shuffles and serves the deck
+
+* **Made and shuffled** in `Game.__init__` (`engine.py`): the identities are generated from the
+  ontology's distribution (every colour times its copies per rank), shuffled with
+  `random.Random(seed)`, and only then numbered, so a card's id carries no information. Hands
+  are dealt by popping from the end of the deck. The seed makes a deal reproducible, and the
+  feed's header records the initial deal.
+* **Never served.** The only code that moves a card out of the deck is `_draw`, which pops the
+  top card into a hand. A view carries only `deck_size`; the regime declares the deck
+  `HiddenFromAll`; the view shapes fail if a deck zone, or a card that is not in a hand, the
+  discard pile or an event, appears; and a draw event is redacted for the player who drew.
+
+## Graphs as a fold
+
+The game is an event log; every state, and every graph, is derived from it:
+
+```
+state(t)    = fold(step, deal, events[:t])           step is a pure transition on events
+view(o, t)  = fold(step, project(o, deal), [project(o, e) for e in events[:t]])
+graph(o, t) = graph_of(view(o, t))                   a read model, rebuilt on demand
+```
+
+* `deal` is the initial hands (the header of the feed). `project(o, .)` removes exactly what the
+  regime hides from player `o`: the deal of `o`'s own hand and `o`'s own draws. Hints, plays,
+  discards and the end are public, so they pass through unchanged.
+* **The law**: viewing the truth equals folding the projected log, `view(o, state(t)) =
+  fold(project(o, events[:t]))`. A player can therefore keep their own state from their own
+  stream, never seeing the truth, and the "common part" of everyone's graph cannot diverge: it
+  comes from the same events through the same `step`.
+* **Diachronic graph** = the graph after each prefix, or the triples each event adds and
+  removes, stacked in order. It needs no new machinery, only folding prefixes.
+* **Implemented**: `feed.py` (schema, `project_record`), `fold.py` (the reference `step` and
+  `fold`) and `tests/test_fold.py`, which checks both equalities after every turn of whole games,
+  for 2 to 5 players, including games that run through the final round. The viewer is served
+  folded states, so it holds no game logic.
+* **Option B or C?** B (this): the events are authoritative and graphs are derived. C would make
+  an RDF store authoritative, with `step` expressed as triples added and removed; the same fold,
+  but the rules would live in SPARQL or SHACL rather than typed Python. B keeps the engine and
+  can still produce the graph when needed (`validate.py`).
+* **Not yet unified**: the engine still mutates its own state and `fold.step` re-implements the
+  same transitions from events, so there are two copies of the rules. The whole-game tests make
+  any drift visible. Making the engine fold its own events would leave one.
+
 ## What is still open
 
-How state should *live*. Today the truth is a Python object, and graphs are read models
-rebuilt on demand (option A in the earlier discussion, plus `truth_graph` for validation).
-Option B, an event log as the canonical persisted record with graphs as folds over it,
-would give the diachronic per-turn view, crash resume and replay from one mechanism, and
-is still my recommendation. It is not built, and nothing here prevents it: the epistemic
-layers above would simply become folds over `(events up to t, observer)`.
+Whether the engine should fold its own events, so that the log is not only sufficient but the
+single source (see "Not yet unified" above). Nothing else here depends on it.

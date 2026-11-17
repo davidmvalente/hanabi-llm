@@ -34,8 +34,9 @@ def test_tool_set_is_minimal_and_partitioned_into_three_families(game2: Game) ->
 def test_schemas(game2: Game) -> None:
     schemas = {s["function"]["name"]: s["function"]["parameters"] for s in toolbox(game2).schemas()}
     assert list(schemas) == ["discard_card", "give_hint", "play_card", "get_state", "explain_rules"]  # action, state, rules
-    assert schemas["give_hint"]["required"] == ["target"]
-    assert schemas["give_hint"]["properties"]["target"]["enum"] == ["Bob"]          # never offers yourself
+    assert schemas["give_hint"]["required"] == ["hint", "player"]
+    assert schemas["give_hint"]["properties"]["player"]["enum"] == ["Bob"]          # never offers yourself
+    assert schemas["give_hint"]["properties"]["hint"]["enum"] == ["blue", "green", "red", "white", "yellow", "1", "2", "3", "4", "5"]
     assert schemas["get_state"]["properties"]["section"]["enum"] == list(SECTIONS)
     assert schemas["get_state"]["required"] == [] and schemas["explain_rules"]["required"] == []
     assert schemas["explain_rules"]["properties"]["topic"]["enum"] == topics(game2.ontology)
@@ -53,14 +54,19 @@ def test_actions_are_validated_not_applied() -> None:
     before = (game.state.turn, len(game.state.events), game.state.hints)
     assert tb.execute("play_card", {"position": 0}).action == PlayCard(0)
     assert tb.execute("discard_card", {"position": "2"}).action == DiscardCard(2)   # numeric strings tolerated
-    assert tb.execute("give_hint", {"target": "Bob", "color": "blue"}).action == GiveHint(1, color=B)
+    assert tb.execute("give_hint", {"player": "Bob", "hint": "blue"}).action == GiveHint(1, B)
+    assert tb.execute("give_hint", {"player": "Bob", "hint": "1"}).action == GiveHint(1, 1)    # the attribute follows from the value
+    assert tb.execute("give_hint", {"player": "Bob", "hint": 1}).action == GiveHint(1, 1)      # a bare integer is tolerated
+    assert tb.execute("give_hint", {"player": "Bob", "hint": "Blue"}).action == GiveHint(1, B)
     assert (game.state.turn, len(game.state.events), game.state.hints) == before
 
 
 def test_rejected_actions_count_but_read_mistakes_are_free(game2: Game) -> None:
     tb = toolbox(game2)
-    for call in (("play_card", "not json"), ("play_card", {"position": 99}), ("give_hint", {"target": "Nobody", "color": "red"}),
-                 ("give_hint", {"target": "Ann", "color": "red"}), ("nonsense", {})):
+    for call in (("play_card", "not json"), ("play_card", {"position": 99}), ("give_hint", {"player": "Nobody", "hint": "red"}),
+                 ("give_hint", {"player": "Ann", "hint": "red"}), ("give_hint", {"player": "Bob"}),
+                 ("give_hint", {"player": "Bob", "hint": "purple"}), ("give_hint", {"player": "Bob", "hint": True}),
+                 ("nonsense", {})):
         out = tb.execute(*call)
         assert out.is_error and out.failed_action, call
     for call in (("get_state", {"section": "everything"}), ("explain_rules", {"topic": "nope"})):
@@ -90,9 +96,10 @@ def test_explain_a_rule_gives_text_reason_and_example(game2: Game) -> None:
 
 def test_explain_an_action_gives_parameters_and_its_rules(game2: Game) -> None:
     out = toolbox(game2).execute("explain_rules", {"topic": "give_hint"}).text
-    assert "target (required)" in out and "color (optional)" in out
-    for rule in ("hint_token_available", "hint_target_is_other", "hint_touches_cards", "hint_one_attribute"):
+    assert "player (required)" in out and "hint (required)" in out and "color (optional)" not in out
+    for rule in ("hint_token_available", "hint_receiver_is_other", "hint_targets_cards", "hint_one_attribute", "hint_is_complete"):
         assert rule in out
+    assert "EVERY card" in toolbox(game2).execute("explain_rules", {"topic": "hint_is_complete"}).text
     assert "misfire_costs_fuse" in toolbox(game2).execute("explain_rules", {"topic": "play_card"}).text
 
 

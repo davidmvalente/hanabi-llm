@@ -93,13 +93,15 @@ hn:choices        a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:str
 hn:deckSize       a rdf:Property ; rdfs:range xsd:integer .
 
 hn:actor          a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Player .
-hn:target         a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Player ;
-                  rdfs:comment "Receiver of a hint." .
+hn:receiver       a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Player ;
+                  rdfs:comment "The player a hint was given to." .
 hn:card           a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Card .
 hn:succeeded      a rdf:Property ; rdfs:domain hn:PlayEvent ; rdfs:range xsd:boolean .
-hn:hintedColor    a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Color .
+hn:hintedColor    a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Color ;
+                  rdfs:comment "A hint names a colour (this property) or a rank (hn:hintedRank), never both." .
 hn:hintedRank     a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Rank .
-hn:touchedPositions a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range xsd:integer .
+hn:targetedPosition a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range xsd:integer ;
+                  rdfs:comment "A position in the receiver's hand that the hint covers. Together they are the subset of the hand the hint targets: every card with the named colour or rank." .
 hn:turnNumber     a rdf:Property ; rdfs:range xsd:integer ;
                   rdfs:comment "The turn an event happened in, or the current turn of the game." .
 
@@ -199,25 +201,31 @@ hn:RuleHintTokenAvailable a hn:Rule ;
     hn:example "With 0 hint tokens left you cannot give a hint; discarding a card returns one." ;
     hn:checkFunction "hint_token_available" .
 
-hn:RuleHintTargetIsOther a hn:Rule ;
-    hn:ruleName "hint_target_is_other" ;
+hn:RuleHintReceiverIsOther a hn:Rule ;
+    hn:ruleName "hint_receiver_is_other" ;
     hn:ruleText "A hint must be given to another player, never to oneself." ;
     hn:rationale "Nobody can see their own cards, so everything you learn about them has to come from a teammate." ;
     hn:example "Alice may hint Bob or Carol, never Alice." ;
-    hn:checkFunction "hint_target_is_other" .
+    hn:checkFunction "hint_receiver_is_other" .
 
-hn:RuleHintTouchesCards a hn:Rule ;
-    hn:ruleName "hint_touches_cards" ;
-    hn:ruleText "A hint must match at least one card in the target's hand; it must reveal something." ;
-    hn:rationale "Keeps hints truthful and informative: you may only name a colour or rank that the target really holds." ;
+hn:RuleHintTargetsCards a hn:Rule ;
+    hn:ruleName "hint_targets_cards" ;
+    hn:ruleText "A hint must target at least one card: the receiver must hold at least one card of the named colour or rank." ;
+    hn:rationale "Keeps hints truthful and informative: you may only name a colour or rank that the receiver really holds." ;
     hn:example "Bob holds no green card, so 'green' is not a legal hint for Bob." ;
-    hn:checkFunction "hint_touches_cards" .
+    hn:checkFunction "hint_targets_cards" .
+
+hn:RuleHintIsComplete a hn:Rule ;
+    hn:ruleName "hint_is_complete" ;
+    hn:ruleText "A hint always covers EVERY card in the receiver's hand with the named colour or rank. The cards it targets are exactly those, so it also tells the receiver that all the other cards are not that colour or rank." ;
+    hn:rationale "Hints are complete, never partial. That makes a hint both honest and informative: the receiver learns what the targeted cards are and, from the cards left out, what the others are not." ;
+    hn:example "Bob holds red 2, red 4 and blue 1. Hinting 'red' targets positions 0 and 1, and also tells Bob that his blue 1 is not red." .
 
 hn:RuleHintExactlyOneAttribute a hn:Rule ;
     hn:ruleName "hint_one_attribute" ;
     hn:ruleText "A hint names exactly one attribute: a colour or a rank, never both." ;
     hn:rationale "Limits each hint to a single fact, which keeps the channel narrow and makes the choice of hint meaningful." ;
-    hn:example "'red' and '3' are legal hints; 'red 3' is not." ;
+    hn:example "hint=red and hint=3 are legal; a single hint cannot name both a colour and a rank." ;
     hn:checkFunction "hint_one_attribute" .
 
 hn:RuleCardInHand a hn:Rule ;
@@ -288,10 +296,11 @@ hn:AffDiscardCard a hn:Affordance ;
 hn:AffGiveHint a hn:Affordance ;
     hn:family "action" ; hn:endsTurn true ;
     hn:functionName "give_hint" ;
-    hn:description "ACTION (ends your turn). Spend one hint token to tell another player about every card in their hand of one colour OR one rank. Reveals the positions of all matching cards." ;
-    hn:requires hn:RuleHintTokenAvailable, hn:RuleHintTargetIsOther, hn:RuleHintTouchesCards, hn:RuleHintExactlyOneAttribute ;
+    hn:description "ACTION (ends your turn). Spend one hint token to tell another player which cards of their hand have one colour OR one rank. The hint targets EVERY card of theirs with that colour or rank, so it also tells them that all their other cards do not." ;
+    hn:requires hn:RuleHintTokenAvailable, hn:RuleHintReceiverIsOther, hn:RuleHintTargetsCards, hn:RuleHintExactlyOneAttribute ;
+    hn:appliesRule hn:RuleHintIsComplete ;
     hn:effectFunction "apply_give_hint" ;
-    hn:hasParameter hn:ParamHintTarget, hn:ParamHintColor, hn:ParamHintRank .
+    hn:hasParameter hn:ParamHintReceiver, hn:ParamHintValue .
 
 hn:ParamPlayPosition a hn:Parameter ;
     hn:paramName "position" ; hn:paramType "integer" ;
@@ -301,17 +310,13 @@ hn:ParamDiscardPosition a hn:Parameter ;
     hn:paramName "position" ; hn:paramType "integer" ;
     hn:paramDescription "Slot index (0-based) of the card in your hand to discard." .
 
-hn:ParamHintTarget a hn:Parameter ;
-    hn:paramName "target" ; hn:paramType "player" ;
+hn:ParamHintReceiver a hn:Parameter ;
+    hn:paramName "player" ; hn:paramType "player" ;
     hn:paramDescription "Seat name of the player receiving the hint. Must not be you." .
 
-hn:ParamHintColor a hn:Parameter ;
-    hn:paramName "color" ; hn:paramType "color" ; hn:optional true ;
-    hn:paramDescription "Colour to reveal. Omit when giving a rank hint." .
-
-hn:ParamHintRank a hn:Parameter ;
-    hn:paramName "rank" ; hn:paramType "rank" ; hn:optional true ;
-    hn:paramDescription "Rank to reveal (1-5). Omit when giving a colour hint." .
+hn:ParamHintValue a hn:Parameter ;
+    hn:paramName "hint" ; hn:paramType "hint" ;
+    hn:paramDescription "The one colour (red, yellow, ...) or the one rank (1-5) to reveal." .
 
 # --- family: state ----------------------------------------------------------------
 # The sections partition everything a player may see, with no overlap:
@@ -458,7 +463,7 @@ hn:BeliefInertia a hn:Kinetic ; hn:conceptName "belief_inertia" ;
 
 hn:HintTorque a hn:Kinetic ; hn:conceptName "hint_torque" ;
     hn:summary "Leverage of a hint: how much it changes what the receiver will do. Touching a card that is playable right now has high leverage; touching a dead card has almost none." ;
-    hn:measuredBy hn:touchedPositions ;
+    hn:measuredBy hn:targetedPosition ;
     hn:guidance "Prefer the hint with the greatest effect on the receiver's next action. If a hint can be read two ways, the receiver may pick the wrong one." .
 
 hn:ActivationEnergy a hn:Kinetic ; hn:conceptName "activation_energy" ;

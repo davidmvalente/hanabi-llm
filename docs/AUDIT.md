@@ -111,6 +111,25 @@ The tool set is exactly three families, with no overlap and nothing missing:
 * **Not done:** the event-sourced state with diachronic per-turn graphs (option B). The
   audit costs about 1.3 s per turn for three seats, so it is opt-in (`--audit`).
 
+## Feed, fold and viewer
+
+* **The old log was not a log.** Events were written as Python `repr` strings, unusable as a
+  stream. The feed (`feed.py`) is plain JSON with the initial deal in the header, so a game can be
+  rebuilt from it alone.
+* **The fold is tested against the engine** after every turn of whole games, for 2 to 5 players,
+  both for the truth and for every player's projected view (`tests/test_fold.py`). A first version
+  of that test was vacuous: random bots lose long before the deck runs out, so the final-round
+  clock was never exercised and a deliberately broken clock went unnoticed. Players that never play
+  now drive games through the final round, and the same mutation fails four tests.
+* **Hint encoding.** `GiveHint(target, color, rank)` with two nullable fields could represent
+  nonsense and called the player the "target". A hint is now `GiveHint(receiver, value)`; the
+  subset of the hand it covers is `targets`; rules were renamed to match (`hint_receiver_is_other`,
+  `hint_targets_cards`) and `hint_is_complete` documents that every matching card is covered.
+* **The viewer holds no game logic.** The server folds the feed and streams states; the page only
+  draws them. Server tests check each streamed state equals the fold, that a half-written line
+  waits, and that nothing external is requested; a headless-browser run checks the blinding and
+  the scrubbing.
+
 ## v1.1 plan: token parsimony and caching
 
 **Is the conversation cached?** Partly, and not as a "thread". Each API call is

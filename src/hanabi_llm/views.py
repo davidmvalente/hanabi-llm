@@ -281,13 +281,13 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
         elif isinstance(ev, HintEvent):
             g.add((node, RDF.type, HN.HintEvent))
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))
-            g.add((node, HN.target, hg[f"player{ev.target}"]))
-            if ev.color is not None:
-                g.add((node, HN.hintedColor, iris.color[ev.color]))
-            if ev.rank is not None:
-                g.add((node, HN.hintedRank, iris.rank[ev.rank]))
-            for pos in ev.touched:
-                g.add((node, HN.touchedPositions, lit(pos)))
+            g.add((node, HN.receiver, hg[f"player{ev.receiver}"]))
+            if isinstance(ev.value, Color):  # the predicate says which attribute, the object its value
+                g.add((node, HN.hintedColor, iris.color[ev.value]))
+            else:
+                g.add((node, HN.hintedRank, iris.rank[ev.value]))
+            for pos in ev.targets:
+                g.add((node, HN.targetedPosition, lit(pos)))
         elif isinstance(ev, DrawEvent):
             g.add((node, RDF.type, HN.DrawEvent))
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))
@@ -315,16 +315,19 @@ def describe_knowledge(k: CardKnowledge) -> str:
 
 
 def describe_event(ev: Event, view: PlayerView) -> str:
-    n = view.names
-    me = view.viewer
+    return narrate_event(ev, view.names, you=view.viewer)
+
+
+def narrate_event(ev: Event, names: Sequence[str], you: Seat | None = None) -> str:
+    """One event as a line of text. The single source of wording for the prompt, the CLI and the viewer."""
 
     def who(seat: Seat) -> str:
-        return f"{n[seat]} (you)" if seat == me else n[seat]
+        return f"{names[seat]} (you)" if seat == you else names[seat]
 
     if isinstance(ev, HintEvent):
-        what = ev.color.value if ev.color is not None else f"rank {ev.rank}"
-        slots = ", ".join(str(p) for p in ev.touched)
-        return f"T{ev.turn} {who(ev.actor)} hinted {who(ev.target)}: {what} cards are at positions [{slots}]"
+        what = ev.value.value if isinstance(ev.value, Color) else f"rank {ev.value}"
+        slots = ", ".join(str(p) for p in ev.targets)
+        return f"T{ev.turn} {who(ev.actor)} hinted {who(ev.receiver)}: {what} cards are at positions [{slots}]; the rest are not"
     if isinstance(ev, PlayEvent):
         outcome = "SUCCESS" if ev.success else "MISFIRE (fuse lost)"
         return f"T{ev.turn} {who(ev.actor)} played position {ev.position}: {ev.card} -> {outcome}"

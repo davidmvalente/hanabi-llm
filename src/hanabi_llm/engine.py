@@ -29,6 +29,7 @@ from .model import (
     Event,
     GiveHint,
     HintEvent,
+    HintValue,
     IllegalAction,
     PlayCard,
     PlayEvent,
@@ -90,23 +91,25 @@ def _card_in_hand(state: GameState, rules: RuleSet, actor: Seat, action: Action)
 
 @bind("hint_one_attribute")
 def _hint_one_attribute(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> None:
+    """A hint names ONE attribute. The encoding (a single ``value``) already rules out "both" and "neither";
+    what is left to check is that the value is a real colour or rank."""
     if not isinstance(action, GiveHint):
         return
-    if (action.color is None) == (action.rank is None):
-        raise IllegalAction("A hint names exactly one attribute: give either `color` or `rank`, not both and not neither.")
-    if action.color is not None and action.color not in rules.colors:
-        raise IllegalAction(f"Unknown colour {action.color!r}.")
-    if action.rank is not None and action.rank not in rules.copies_by_rank:
-        raise IllegalAction(f"Unknown rank {action.rank}. Ranks are {sorted(rules.copies_by_rank)}.")
+    value = action.value
+    if isinstance(value, Color):
+        if value not in rules.colors:
+            raise IllegalAction(f"Unknown colour {value!r}.")
+    elif isinstance(value, bool) or value not in rules.copies_by_rank:
+        raise IllegalAction(f"Unknown hint {value!r}: name a colour or a rank in {sorted(rules.copies_by_rank)}.")
 
 
-@bind("hint_target_is_other")
-def _hint_target_is_other(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> None:
+@bind("hint_receiver_is_other")
+def _hint_receiver_is_other(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> None:
     if not isinstance(action, GiveHint):
         return
-    if not 0 <= action.target < len(state.names):
-        raise IllegalAction("Unknown hint target.")
-    if action.target == actor:
+    if not 0 <= action.receiver < len(state.names):
+        raise IllegalAction("Unknown player to hint.")
+    if action.receiver == actor:
         raise IllegalAction("You cannot give a hint to yourself.")
 
 
@@ -116,19 +119,22 @@ def _hint_token_available(state: GameState, rules: RuleSet, actor: Seat, action:
         raise IllegalAction("No hint tokens left. Play or discard a card instead; discarding returns a hint token.")
 
 
-def _matches(card: Card, hint: GiveHint) -> bool:
-    return card.color == hint.color if hint.color is not None else card.rank == hint.rank
+def hint_targets(hand: list[Card], value: HintValue) -> tuple[int, ...]:
+    """The positions a hint of ``value`` covers: EVERY card of the hand with that colour or rank."""
+    if isinstance(value, Color):
+        return tuple(i for i, c in enumerate(hand) if c.color == value)
+    return tuple(i for i, c in enumerate(hand) if c.rank == value)
 
 
-@bind("hint_touches_cards")
-def _hint_touches_cards(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> None:
+@bind("hint_targets_cards")
+def _hint_targets_cards(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> None:
     if not isinstance(action, GiveHint):
         return
-    if not any(_matches(c, action) for c in state.hands[action.target]):
-        what = action.color.value if action.color is not None else str(action.rank)
+    if not hint_targets(state.hands[action.receiver], action.value):
+        what = action.value.value if isinstance(action.value, Color) else str(action.value)
         raise IllegalAction(
-            f"{state.names[action.target]} holds no card matching '{what}', so this hint would reveal nothing. "
-            "A hint must touch at least one card."
+            f"{state.names[action.receiver]} holds no card matching '{what}', so this hint would reveal nothing. "
+            "A hint must target at least one card."
         )
 
 
@@ -216,20 +222,21 @@ def _apply_discard_card(state: GameState, rules: RuleSet, actor: Seat, action: A
 def _apply_give_hint(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> list[Event]:
     assert isinstance(action, GiveHint)
     state.hints -= 1
-    touched: list[int] = []
-    for position, card in enumerate(state.hands[action.target]):
+    hand = state.hands[action.receiver]
+    targets = hint_targets(hand, action.value)
+    value = action.value
+    for position, card in enumerate(hand):
         know = state.knowledge[card.uid]
-        if _matches(card, action):
-            touched.append(position)
-            if action.color is not None:
-                know.color = action.color
+        if position in targets:  # the cards the hint covers ARE this colour / rank ...
+            if isinstance(value, Color):
+                know.color = value
             else:
-                know.rank = action.rank
-        elif action.color is not None:
-            know.not_colors.add(action.color)
-        elif action.rank is not None:
-            know.not_ranks.add(action.rank)
-    return [HintEvent(state.turn, actor, action.target, action.color, action.rank, tuple(touched))]
+                know.rank = value
+        elif isinstance(value, Color):  # ... and, because a hint is complete, every other card is NOT
+            know.not_colors.add(value)
+        else:
+            know.not_ranks.add(value)
+    return [HintEvent(state.turn, actor, action.receiver, value, targets)]
 
 
 # ---------------------------------------------------------------------------
@@ -301,15 +308,15 @@ class Game:
             actions.append(PlayCard(pos))
             actions.append(DiscardCard(pos))
         if st.hints > 0:
-            for target, hand in enumerate(st.hands):
-                if target == actor:
+            for receiver, hand in enumerate(st.hands):
+                if receiver == actor:
                     continue
                 for color in self.rules.colors:
-                    if any(c.color == color for c in hand):
-                        actions.append(GiveHint(target, color=color))
+                    if hint_targets(hand, color):
+                        actions.append(GiveHint(receiver, color))
                 for rank in sorted(self.rules.copies_by_rank):
-                    if any(c.rank == rank for c in hand):
-                        actions.append(GiveHint(target, rank=rank))
+                    if hint_targets(hand, rank):
+                        actions.append(GiveHint(receiver, rank))
         return actions
 
     def check(self, actor: Seat, action: Action) -> AffordanceSpec:

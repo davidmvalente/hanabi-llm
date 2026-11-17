@@ -21,7 +21,7 @@ from .model import Color
 HN: Final = Namespace("https://example.org/hanabi#")
 
 #: Parameter types the ontology may use, mapped to JSON-schema in tools.py.
-PARAM_TYPES: Final = frozenset({"integer", "string", "color", "rank", "player", "choice", "topic"})
+PARAM_TYPES: Final = frozenset({"integer", "string", "hint", "player", "choice", "topic"})
 
 
 @dataclass(frozen=True, slots=True)

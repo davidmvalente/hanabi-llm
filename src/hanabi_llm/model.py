@@ -68,12 +68,32 @@ class DiscardCard:
     position: int
 
 
+#: What a hint names: a colour (``Color``) or a rank (``int``). The two kinds are disjoint,
+#: so one field says both WHICH attribute and its value, and "neither" or "both" cannot be written.
+HintValue = Color | int
+
+
+def hint_attribute(value: HintValue) -> str:
+    """"color" or "rank"."""
+    return "color" if isinstance(value, Color) else "rank"
+
+
 @dataclass(frozen=True, slots=True)
 class GiveHint:
+    """Tell ``receiver`` which cards of their hand are ``value``.
+
+    The hint always covers EVERY card of the receiver's hand with that colour
+    or rank, so what it targets is a subset of the hand (see ``HintEvent.targets``)
+    and it also tells the receiver that all the other cards are not ``value``.
+    """
+
     affordance: ClassVar[str] = "give_hint"
-    target: Seat
-    color: Color | None = None
-    rank: int | None = None
+    receiver: Seat
+    value: HintValue
+
+    @property
+    def attribute(self) -> str:
+        return hint_attribute(self.value)
 
 
 Action = PlayCard | DiscardCard | GiveHint
@@ -103,12 +123,21 @@ class DiscardEvent:
 
 @dataclass(frozen=True, slots=True)
 class HintEvent:
+    """``actor`` told ``receiver`` that the cards at ``targets`` are ``value`` (and the rest are not).
+
+    ``targets`` is the subset of the receiver's hand the hint covers, as positions
+    at the moment of the hint: exactly the cards that have ``value``, no more, no fewer.
+    """
+
     turn: int
     actor: Seat
-    target: Seat
-    color: Color | None
-    rank: int | None
-    touched: tuple[int, ...]
+    receiver: Seat
+    value: HintValue
+    targets: tuple[int, ...]
+
+    @property
+    def attribute(self) -> str:
+        return hint_attribute(self.value)
 
 
 @dataclass(frozen=True, slots=True)

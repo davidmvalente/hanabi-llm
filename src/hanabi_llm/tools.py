@@ -22,7 +22,7 @@ from typing import Any
 
 from .engine import Game
 from .explain import explain, topics
-from .model import Action, Color, DiscardCard, GiveHint, IllegalAction, PlayCard, Seat
+from .model import Action, Color, DiscardCard, GiveHint, HintValue, IllegalAction, PlayCard, Seat
 from .ontology import AffordanceSpec, ParamSpec, RuleSet
 from .registry import FUNCTIONS, bind
 from .states import SECTIONS, state_text
@@ -78,10 +78,8 @@ def _param_schema(p: ParamSpec, ctx: SchemaContext) -> JSON:
             base = {"type": "integer", "minimum": 0}
         case "string":
             base = {"type": "string"}
-        case "color":
-            base = {"type": "string", "enum": [c.value for c in ctx.rules.colors]}
-        case "rank":
-            base = {"type": "integer", "enum": sorted(ctx.rules.copies_by_rank)}
+        case "hint":  # a colour or a rank; one field, so "both" or "neither" cannot be written
+            base = {"type": "string", "enum": [c.value for c in ctx.rules.colors] + [str(r) for r in sorted(ctx.rules.copies_by_rank)]}
         case "player":
             base = {"type": "string", "enum": ctx.others}
         case "choice":
@@ -139,6 +137,18 @@ def _as_int(value: object, what: str) -> int:
         raise IllegalAction(f"`{what}` must be an integer, got {value!r}.") from None
 
 
+def parse_hint(raw: object, rules: RuleSet) -> HintValue:
+    """A hint is a colour name or a rank. Ranks may arrive as 3 or "3"; the attribute follows from the value."""
+    if isinstance(raw, bool) or raw is None:
+        raise IllegalAction("`hint` is required: a colour or a rank.")
+    text = str(raw).strip().lower()
+    if text in {c.value for c in rules.colors}:
+        return Color(text)
+    if text.isdigit():
+        return int(text)
+    raise IllegalAction(f"Unknown hint {raw!r}: name a colour {[c.value for c in rules.colors]} or a rank {sorted(rules.copies_by_rank)}.")
+
+
 def build_action(game: Game, name: str, args: JSON) -> Action:
     """Turn tool arguments into an ``Action``. Raises ``IllegalAction`` if malformed."""
     match name:
@@ -148,17 +158,10 @@ def build_action(game: Game, name: str, args: JSON) -> Action:
             return DiscardCard(_as_int(args.get("position"), "position"))
         case "give_hint":
             names = game.state.names
-            target = args.get("target")
-            if target not in names:
-                raise IllegalAction(f"Unknown target {target!r}. Players: {names}.")
-            color: Color | None = None
-            if args.get("color") is not None:
-                try:
-                    color = Color(str(args["color"]).lower())
-                except ValueError:
-                    raise IllegalAction(f"Unknown colour {args['color']!r}.") from None
-            rank = _as_int(args["rank"], "rank") if args.get("rank") is not None else None
-            return GiveHint(names.index(str(target)), color=color, rank=rank)
+            player = args.get("player")
+            if player not in names:
+                raise IllegalAction(f"Unknown player {player!r}. Players: {names}.")
+            return GiveHint(names.index(str(player)), parse_hint(args.get("hint"), game.rules))
     raise IllegalAction(f"Tool {name!r} is not an action.")
 
 
