@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from collections import deque
 
 import httpx
 import pytest
 
 import hanabi_llm.llm as llm
-import hanabi_llm.tools as tools
 from conftest import B, G, R, Y, rig
 from hanabi_llm.__main__ import SEAT_NAMES
 from hanabi_llm.engine import Game
@@ -42,113 +40,42 @@ def call(name: str, args: dict[str, object], id: str = "c1") -> Completion:
     return Completion(None, (ToolCall(id, name, json.dumps(args)),))
 
 
-def ctx_for(game: Game, seat: int = 0, notes: dict[int, str] | None = None) -> TurnContext:
+def ctx_for(game: Game, seat: int = 0) -> TurnContext:
     view = build_view(game, seat)
-    return TurnContext(seat, view, ToolBox(game, seat, view, notes if notes is not None else {}),
-                       tuple(game.legal_actions(seat)), "")
+    return TurnContext(seat, view, ToolBox(game, seat, view), tuple(game.legal_actions(seat)))
 
 
 def rigged() -> Game:
     return rig(Game(["Ann", "Bob"], seed=0), [[(R, 1)] * 5, [(B, 1)] * 5], deck=[(Y, 2)] * 10)
 
 
-# --- toolbox ---------------------------------------------------------------
-
-
-def test_tools_come_from_ontology(game2: Game) -> None:
-    schemas = {s["function"]["name"]: s["function"] for s in ctx_for(game2).toolbox.schemas()}
-    assert set(schemas) == {"play_card", "discard_card", "give_hint", "get_state", "get_rules",
-                            "get_concepts", "estimate_card", "query_knowledge", "take_notes"}
-    hint = schemas["give_hint"]["parameters"]
-    assert hint["required"] == ["target"]
-    assert hint["properties"]["target"]["enum"] == ["Bob"]  # never offers yourself
-
-
-async def test_error_accounting(game2: Game) -> None:
-    tb = ctx_for(game2).toolbox
-    assert (await tb.execute("play_card", "not json")).failed_action
-    assert (await tb.execute("give_hint", {"target": "Nobody", "color": "red"})).failed_action
-    assert (await tb.execute("nonsense", {})).failed_action
-    free = await tb.execute("query_knowledge", {"sparql": "SELEKT"})   # mistakes in READ tools are free
-    assert free.is_error and not free.failed_action
-    assert (await tb.execute("discard_card", {"position": "2"})).action == DiscardCard(2)
-
-
-async def test_sparql_is_read_only_and_view_scoped() -> None:
-    tb = ctx_for(rigged()).toolbox
-    for bad in ("DELETE WHERE { ?s ?p ?o }", "SELECT * WHERE { SERVICE <http://x> { ?s ?p ?o } }", "SELECT * WHERE {" + " " * 2000 + "}"):
-        assert (await tb.execute("query_knowledge", {"sparql": bad})).is_error
-    mine = await tb.execute("query_knowledge", {"sparql": "SELECT ?c WHERE { ?c hn:hasColor hn:Red }"})
-    assert mine.text == "(no results)"  # my own red cards are not in my graph
-
-
-async def test_slow_query_times_out_without_blocking(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tools, "SPARQL_TIMEOUT_S", 0.05)
-    monkeypatch.setattr(tools, "run_sparql_select", lambda g, q: (time.sleep(0.3), "late")[1])
-    start = time.monotonic()
-    out = await ctx_for(rigged()).toolbox.execute("query_knowledge", {"sparql": "SELECT * WHERE {?s ?p ?o}"})
-    assert out.is_error and "longer than" in out.text and time.monotonic() - start < 0.25
-
-
-async def test_knowledge_tools() -> None:
-    tb = ctx_for(rigged()).toolbox
-    assert "Deck: 50 cards" in (await tb.execute("get_rules", {})).text
-    assert "red 1" not in (await tb.execute("get_state", {})).text        # still hides my hand
-    index = (await tb.execute("get_concepts", {"category": "kinetic"})).text
-    assert "card_mass" in index and "hand_shift" not in index
-    assert "Guidance:" in (await tb.execute("get_concepts", {"name": "activation_energy"})).text
-    assert (await tb.execute("get_concepts", {"name": "nope"})).is_error
-    # the same knowledge is reachable through the graph
-    q = "SELECT ?n WHERE { ?c a hn:Kinetic ; hn:conceptName ?n }"
-    assert (await tb.execute("query_knowledge", {"sparql": q})).text.count("\n") == 6
-
-
-async def test_estimate_card_counts_unseen_copies(game2: Game) -> None:
-    rig(game2, [[(Y, 1)] * 5, [(R, 5), (B, 1), (B, 1), (B, 1), (B, 2)]])
-    game2.state.knowledge[game2.state.hands[0][0].uid].rank = 5   # Ann was told card 0 is a 5
-    out = (await ctx_for(game2).toolbox.execute("estimate_card", {"position": 0})).text
-    assert "P(is a 5) = 100%" in out and "P(playable now) = 0%" in out
-    assert "red 5" not in out and "yellow 5: 25%" in out          # Bob holds the red 5 -> 4 candidates
-    assert (await ctx_for(game2).toolbox.execute("estimate_card", {"position": 9})).is_error
-
-
 # --- LLM player ------------------------------------------------------------
 
 
 async def test_reads_are_free_then_one_action_ends_turn() -> None:
-    game, notes = rigged(), {}
+    game = rigged()
     client = ScriptedClient([
-        call("get_state", {}, "a"), call("get_rules", {}, "b"), call("estimate_card", {"position": 0}, "c"),
-        call("take_notes", {"notes": "check later"}, "d"), call("give_hint", {"target": "Bob", "rank": 1}, "e"),
+        call("get_state", {"section": "tokens"}, "a"), call("explain_rules", {"topic": "give_hint"}, "b"),
+        call("give_hint", {"target": "Bob", "rank": 1}, "e"),
     ])
-    result = await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game, 0, notes))
-    assert result.action == GiveHint(1, rank=1) and notes[0] == "check later"
+    result = await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
+    assert result.action == GiveHint(1, rank=1)
+    assert "## tokens" in json.dumps(client.seen[1])  # the state tool's answer went back to the model
 
 
-async def test_noninterference_hidden_cards_never_reach_the_model() -> None:
-    """Two games that differ ONLY in Ann's own hidden cards and the deck must
-    produce byte-identical input to Ann's model, across every read tool."""
-
-    async def play_script(hand: list[tuple[object, int]], deck: list[tuple[object, int]]) -> list[list[JSON]]:
-        game = rig(Game(["Ann", "Bob"], seed=0), [hand, [(B, 1)] * 5], deck=deck)  # type: ignore[arg-type]
-        client = ScriptedClient([
-            call("get_state", {}, "a"), call("get_rules", {}, "b"), call("estimate_card", {"position": 0}, "c"),
-            call("estimate_card", {"position": 4}, "d"),
-            call("query_knowledge", {"sparql": "SELECT ?c ?p WHERE { ?c hn:heldBy ?p }"}, "e"),
-            call("query_knowledge", {"sparql": "SELECT ?c ?col WHERE { ?c hn:hasColor ?col }"}, "f"),
-            call("discard_card", {"position": 0}, "g"),
-        ])
-        await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
-        return client.seen
-
-    seen_a = await play_script([(R, 1)] * 5, [(Y, 2)] * 10)
-    seen_b = await play_script([(G, 4), (G, 5), (Y, 3), (B, 2), (R, 5)], [(Y, 5)] * 10)
-    assert json.dumps(seen_a) == json.dumps(seen_b)
+async def test_first_message_carries_the_whole_state_and_the_prompt_names_the_tools() -> None:
+    game = rigged()
+    client = ScriptedClient([call("discard_card", {"position": 0})])
+    await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
+    system, user = client.seen[0][0]["content"], client.seen[0][1]["content"]
+    assert user.count("## ") == 6 and "Choose your action now." in user
+    for tool in ("get_state", "explain_rules", "play_card", "discard_card", "give_hint"):
+        assert tool in system
 
 
 async def test_read_tool_mistakes_never_disqualify() -> None:
     game = rigged()
-    client = ScriptedClient([call("query_knowledge", {"sparql": "garbage"}, str(i)) for i in range(5)]
+    client = ScriptedClient([call("get_state", {"section": "nope"}, str(i)) for i in range(5)]
                             + [call("discard_card", {"position": 0})])
     assert (await LLMPlayer("Ann", client, game, 0, max_calls=8).take_turn(ctx_for(game))).action == DiscardCard(0)
 
@@ -184,6 +111,21 @@ async def test_provider_error_is_not_the_models_fault() -> None:
     with pytest.raises(PlayerFault) as exc:
         await LLMPlayer("Ann", ScriptedClient([LLMError("503 after retries")]), game, 0).take_turn(ctx_for(game))
     assert exc.value.kind is FaultKind.PROVIDER_ERROR and not exc.value.kind.attributable
+
+
+async def test_noninterference_whole_conversation() -> None:
+    """Two games differing ONLY in Ann's hidden cards and the deck give her model byte-identical input."""
+
+    async def conversation(hand: list, deck: list) -> list[list[JSON]]:  # type: ignore[type-arg]
+        game = rig(Game(["Ann", "Bob"], seed=0), [hand, [(B, 1)] * 5], deck=deck)
+        client = ScriptedClient([call("get_state", {}, "a"), call("explain_rules", {}, "b"),
+                                 call("get_state", {"section": "hands"}, "c"), call("discard_card", {"position": 0}, "d")])
+        await LLMPlayer("Ann", client, game, 0).take_turn(ctx_for(game))
+        return client.seen
+
+    a = await conversation([(R, 1)] * 5, [(Y, 2)] * 10)
+    b = await conversation([(G, 4), (G, 5), (Y, 3), (B, 2), (R, 5)], [(Y, 5)] * 10)
+    assert json.dumps(a) == json.dumps(b)
 
 
 # --- referee ---------------------------------------------------------------

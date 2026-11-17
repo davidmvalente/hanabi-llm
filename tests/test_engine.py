@@ -12,7 +12,7 @@ def test_ontology_drives_setup() -> None:
     onto = load_ontology()
     assert onto.rules.deck_size == 50
     assert onto.rules.hand_size_by_players == {2: 5, 3: 5, 4: 4, 5: 4}
-    assert set(onto.affordances) >= {"play_card", "discard_card", "give_hint", "query_knowledge", "take_notes"}
+    assert set(onto.affordances) == {"play_card", "discard_card", "give_hint", "get_state", "explain_rules"}
 
 
 @pytest.mark.parametrize(("n", "hand"), [(2, 5), (3, 5), (4, 4), (5, 4)])

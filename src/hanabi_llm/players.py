@@ -2,7 +2,7 @@
 
 ``LLMPlayer`` runs the model's tool-calling loop for ONE turn. It sees only
 its own ``PlayerView`` (through the rendered text and the read tools), so a
-model can never read another model's hidden information or private notes.
+model can never read another model's hidden information.
 
 A player either returns a valid action or raises ``PlayerFault``; there is no
 "best effort" substitute move (see ``faults.py`` for why).
@@ -19,7 +19,8 @@ from .faults import FaultKind, PlayerFault
 from .llm import JSON, ChatClient, Completion, LLMError
 from .model import Action, Seat
 from .tools import ToolBox
-from .views import PlayerView, render_view
+from .states import state_text
+from .views import PlayerView
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +29,6 @@ class TurnContext:
     view: PlayerView
     toolbox: ToolBox
     legal: tuple[Action, ...]
-    notes: str
 
 
 @dataclass(slots=True)
@@ -58,6 +58,17 @@ class RandomPlayer:
         return TurnResult(self._rng.choice(ctx.legal))
 
 
+def _tool_lines(game: Game, max_calls: int) -> str:
+    """Describe the tool families from the ontology, so the prompt cannot drift."""
+    by_family: dict[str, list[str]] = {}
+    for name, spec in sorted(game.ontology.affordances.items()):
+        by_family.setdefault(spec.family, []).append(name)
+    free = ", ".join(by_family["state"] + by_family["rules"])
+    return (f"Free tools, usable as often as you like (up to {max_calls} model calls per turn in total): {free}. "
+            f"The current state is also given to you at the start of every turn. "
+            f"Action tools: {', '.join(sorted(by_family['action']))}.")
+
+
 def build_system_prompt(game: Game, seat: Seat, *, max_calls: int, max_failed_actions: int) -> str:
     """Rules text comes from the ontology, so prompt and engine cannot disagree."""
     rules = game.rules
@@ -69,14 +80,14 @@ GOAL: together, build five fireworks (colours: {', '.join(c.value for c in rules
 
 The twist: you can see everyone's cards EXCEPT YOUR OWN. The only communication allowed is the `give_hint` action. Any text you write besides tool calls is NOT seen by anyone.
 
-Deck: each colour has {', '.join(f'{n}x rank {r}' for r, n in sorted(rules.copies_by_rank.items()))}. You start with {rules.initial_hints} hint tokens (max {rules.max_hints}) and {rules.initial_fuses} fuse tokens.
+Deck: each colour has {', '.join(f'{n}x rank {r}' for r, n in sorted(rules.copies_by_rank.items()))}. Hint tokens: {rules.initial_hints} to start, capacity {rules.max_hints}. Fuse tokens: {rules.initial_fuses}.
 
 Rules:
 {rule_lines}
 
 HOW A TURN WORKS
-1. Information tools are free and unlimited in number (up to {max_calls} model calls per turn in total): get_state, get_rules, get_concepts (game-theory notes: mechanics, dynamics, kinetics), estimate_card (odds for one of your own cards), query_knowledge (SPARQL over what you may see) and take_notes (private memory for your later turns). Use them as often as you like before acting.
-2. Your turn ends the moment you call exactly ONE action tool that is accepted: play_card, discard_card or give_hint. After that, the next player moves.
+1. {_tool_lines(game, max_calls)}
+2. Your turn ends the moment you call exactly ONE action tool that is accepted. After that, the next player moves.
 3. A rejected action returns an error and you may try again. If you make {max_failed_actions} rejected action attempts in one turn, or never take an action within the call budget, the game is aborted and counted as your fault."""
 
 
@@ -97,15 +108,15 @@ class LLMPlayer:
         self._client = client
         self._max_calls = max_calls
         self._max_failed = max_failed_actions
+        self._rules = game.rules
         self._system = build_system_prompt(game, seat, max_calls=max_calls, max_failed_actions=max_failed_actions)
 
     async def take_turn(self, ctx: TurnContext) -> TurnResult:
         trace: list[JSON] = []
         ptok = ctok = failed = 0
-        notes = f"\n\nYour private notes from earlier turns:\n{ctx.notes}" if ctx.notes else ""
         messages: list[JSON] = [
             {"role": "system", "content": self._system},
-            {"role": "user", "content": render_view(ctx.view) + notes + "\n\nChoose your action now."},
+            {"role": "user", "content": state_text(ctx.view, self._rules) + "\n\nChoose your action now."},
         ]
         tools = ctx.toolbox.schemas()
 
@@ -127,7 +138,7 @@ class LLMPlayer:
                 messages.append(nudge)
                 trace.append(nudge)
             for call in completion.tool_calls:
-                outcome = await ctx.toolbox.execute(call.name, call.arguments)
+                outcome = ctx.toolbox.execute(call.name, call.arguments)
                 tool_msg: JSON = {"role": "tool", "tool_call_id": call.id, "content": outcome.text}
                 messages.append(tool_msg)
                 trace.append(tool_msg)

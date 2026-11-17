@@ -5,8 +5,8 @@ never touches it. Instead ``build_view(game, viewer)`` produces a
 ``PlayerView``: a redacted snapshot containing exactly what that seat is
 allowed to know. From a view we derive
 
-  * an RDF knowledge graph (``view_graph``) the model can query with SPARQL, and
-  * compact text (``render_view``) placed in the model's prompt.
+  * an RDF graph (``view_graph``), used for validation and analysis, and
+  * text sections (``states.state_text``) shown to the model.
 
 The "synchronised common part" is therefore not replicated state but the
 public portion of every projection, computed from the same source, so it
@@ -144,13 +144,20 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
     def lit(value: int | bool) -> Literal:
         return Literal(value, datatype=XSD.boolean if isinstance(value, bool) else XSD.integer)
 
-    # Tokens, deck, clock.
+    # Turn state (the game node) and the two token pools: available + spent = capacity.
     state_node = hg["state"]
     g.add((state_node, RDF.type, HN.Game))
-    g.add((state_node, HN.hintTokensLeft, lit(view.hints)))
-    g.add((state_node, HN.fuseTokensLeft, lit(view.fuses)))
     g.add((state_node, HN.deckSize, lit(view.deck_size)))
     g.add((state_node, HN.turnNumber, lit(view.turn)))
+    for node_name, cls, available, capacity in (
+        ("hintState", HN.HintState, view.hints, game.rules.max_hints),
+        ("fuseState", HN.FuseState, view.fuses, game.rules.initial_fuses),
+    ):
+        pool = hg[node_name]
+        g.add((pool, RDF.type, cls))
+        g.add((pool, HN.available, lit(available)))
+        g.add((pool, HN.capacity, lit(capacity)))
+        g.add((pool, HN.spent, lit(capacity - available)))
 
     # Stacks.
     for color, height in view.stacks.items():
@@ -210,7 +217,7 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
                 continue
             g.add((me, HN.canInvoke, spec.iri))
     for spec in game.ontology.affordances.values():
-        if not spec.ends_turn:  # read-only / notes tools are always open
+        if not spec.ends_turn:  # read tools are always open
             g.add((me, HN.canInvoke, spec.iri))
 
     # Event log (already redacted).
@@ -247,11 +254,11 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
 
 
 # ---------------------------------------------------------------------------
-# Text rendering (what the model reads each turn)
+# Text describers (used by states.py to render sections)
 # ---------------------------------------------------------------------------
 
 
-def _describe_knowledge(k: CardKnowledge) -> str:
+def describe_knowledge(k: CardKnowledge) -> str:
     parts: list[str] = []
     if k.color is not None:
         parts.append(f"colour={k.color.value}")
@@ -264,7 +271,7 @@ def _describe_knowledge(k: CardKnowledge) -> str:
     return ", ".join(parts) if parts else "nothing known"
 
 
-def _describe_event(ev: Event, view: PlayerView) -> str:
+def describe_event(ev: Event, view: PlayerView) -> str:
     n = view.names
     me = view.viewer
 
@@ -284,37 +291,3 @@ def _describe_event(ev: Event, view: PlayerView) -> str:
         card = "a new card" if ev.card.rank == 0 else f"{ev.card}"
         return f"T{ev.turn} {who(ev.actor)} drew {card} into position (last slot)"
     return f"T{ev.turn} GAME OVER: {ev.reason}. Score {ev.score}."
-
-
-def render_view(view: PlayerView, max_events: int = 30) -> str:
-    """Human/LLM-readable summary of a view."""
-    lines: list[str] = []
-    me = view.viewer
-    lines.append(f"You are {view.names[me]}. It is {'YOUR turn' if me == view.current else view.names[view.current] + chr(39) + 's turn'} (turn {view.turn}).")
-    lines.append(f"Score: {view.score}/25 | hint tokens: {view.hints} | fuse tokens: {view.fuses} | cards in deck: {view.deck_size}")
-    if view.final_turns_left is not None:
-        lines.append(f"FINAL ROUND: the deck is empty; {view.final_turns_left} turn(s) remain including this one.")
-    lines.append("Fireworks: " + ", ".join(f"{c.value} {h}" for c, h in view.stacks.items()))
-    if view.discard:
-        lines.append("Discard pile: " + ", ".join(str(c) for c in view.discard))
-    else:
-        lines.append("Discard pile: (empty)")
-
-    lines.append("\nOther players' hands (you can see these; they cannot):")
-    for seat, hand in enumerate(view.hands):
-        if seat == me:
-            continue
-        lines.append(f"  {view.names[seat]}:")
-        for cv in hand:
-            assert cv.card is not None
-            lines.append(f"    position {cv.position}: {cv.card}   (they know: {_describe_knowledge(cv.knowledge)})")
-
-    lines.append("\nYour own hand (identities hidden; this is what the hints have told you):")
-    for cv in view.hands[me]:
-        lines.append(f"  position {cv.position}: {_describe_knowledge(cv.knowledge)}")
-    lines.append("New cards enter at the last position; cards after a played/discarded one shift down by one.")
-
-    recent = view.events[-max_events:]
-    lines.append(f"\nRecent events (last {len(recent)}):")
-    lines.extend("  " + _describe_event(ev, view) for ev in recent)
-    return "\n".join(lines)

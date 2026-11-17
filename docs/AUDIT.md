@@ -14,8 +14,8 @@ tournament layer.
 | 4 | **Blame was undifferentiated.** Provider outages, rate limits and slow networks were handled like model mistakes. | High (fairness) | `FaultKind` splits attributable model faults (`invalid_actions`, `no_action`) from non-attributable infra faults (`provider_error`, `timeout`). Infra faults void the game for everyone and say it should be re-run. | parametrized fault tests |
 | 5 | **Wall-clock timeout punished slow models.** Latency is not skill. | Medium | Timeout is only a generous safety net (300 s) and is classed as infra. Per-turn budgets are counted in model calls and rejected actions, not seconds. | `test_timeout_is_infra_not_blame` |
 | 6 | **Seat names were built from model ids** (`P0_claude-sonnet...`). A model could see which teammate is which model, and be biased by it. | Medium (bias) | Neutral names (Alice, Bob...). The seat to model map lives only in the log header. | `test_seat_names_are_neutral` |
-| 7 | **Sync SPARQL could stall everyone.** rdflib blocks the event loop; `asyncio.timeout` cannot interrupt it. | High (robustness) | Query runs in a daemon thread with a 5 s wait limit, length cap and row cap. | `test_slow_query_times_out_without_blocking` |
-| 8 | **Mistakes in free tools counted against the model.** | Medium | Only rejected *action* attempts count toward the budget. Read-tool errors are free (bounded by the call budget). | `test_read_tool_mistakes_never_disqualify` |
+| 7 | **Sync SPARQL could stall everyone.** rdflib blocks the event loop; `asyncio.timeout` cannot interrupt it. | High (robustness) | Superseded: the generic SPARQL tool was removed altogether (see "Experiment 1: MECE and minimal tools"), so the hazard no longer exists. | n/a |
+| 8 | **Mistakes in free tools counted against the model.** | Medium | Only rejected *action* attempts count toward the budget. Read-tool errors are free (bounded by the call budget). | `test_rejected_actions_count_but_read_mistakes_are_free` |
 | 9 | **Games were not reproducible.** Seed optional, not logged, no action log. | Medium | Seed always chosen and logged; `GameResult.action_log` + seed replays a game exactly. | `test_action_log_and_seed_replay_exactly` |
 | 10 | **Sampling limits uncontrolled.** Temperature and output length were implicit. | Low | `--temperature`, `--max-tokens`, budgets are identical for all seats and written to the log header. | n/a |
 | 11 | **Transcript could be lost on a crash.** | Low | Log is flushed after every record; a final `result` record carries status, blame and `counts_for_ranking`. | n/a |
@@ -39,9 +39,6 @@ tournament layer.
 
 ## Known limitations
 
-* **Runaway SPARQL.** Python cannot kill a thread, so a pathological query
-  keeps using CPU until the process exits and can slow other seats through the
-  GIL. The robust fix is a subprocess sandbox for `query_knowledge`.
 * **Truncated replies.** A reply cut off by `max_tokens` currently looks like
   "no tool call" and counts against the model. It should be detected through
   `finish_reason == "length"` and retried or classed as configuration, not blame.
@@ -53,10 +50,9 @@ tournament layer.
 
 ## Open items (need your decision)
 
-1. **Helper tools change what is measured.** `estimate_card` does the
-   card-counting arithmetic for the model. That helps weaker reasoners and
-   narrows gaps between models. Keep it for everyone, make it a switch
-   (`--no-helpers`), or drop it for the championship?
+1. **Helper tools (decided for experiment 1).** Odds, census, strategy notes and
+   private notes are not offered; see the next section. Revisit for later
+   experiments, as a separate arm so their effect can be measured.
 2. **Fault consequences.** Options: (a) the faulting model scores 0 and the
    teammates' game is re-run; (b) the game is simply void and re-run, with
    repeated faults disqualifying the model; (c) a fixed penalty. The code
@@ -64,6 +60,36 @@ tournament layer.
 3. **Seat and pairing design.** Seat 0 moves first. A fair championship should
    rotate seats and reuse the same deal seeds across every pairing, then
    compare over many seeds. That belongs in a runner above `play_game`.
+
+## Experiment 1: MECE and minimal tools
+
+The tool set is exactly three families, with no overlap and nothing missing:
+
+| Family | Tools | Job |
+|---|---|---|
+| action | `play_card`, `discard_card`, `give_hint` | change the game; only these end the turn |
+| state | `get_state(section?)` | read what is true now |
+| rules | `explain_rules(topic?)` | read how the game works, and why |
+
+* **State is a partition.** The six sections (turn, tokens, fireworks, discard,
+  hands, history) cover every field of a player's view exactly once, and the
+  full state is the sections in order (`test_sections_partition_the_state`).
+  The first message of each turn is the full state; `get_state` re-reads a part.
+* **Tokens have one vocabulary.** Hint and fuse tokens are pools with
+  `available`, `spent` and `capacity` (`spent = capacity - available`). This
+  removed the event-replay code that tracked refunds. The turn state already
+  existed (`turn`, `current`, `final_turns_left`, `deck_size`) and is exposed as
+  the `turn` section.
+* **Rules are explained from the ontology.** Each rule has a name, text,
+  rationale and example in `hanabi.ttl`; `explain_rules` only formats them.
+* **Removed, because each changes what is measured:** SPARQL (the model had to
+  write queries instead of using game vocabulary), `estimate_card` and the card
+  census (they do the counting for the model), strategy concepts, private notes
+  (turns are stateless anyway) and dry-run helpers. The concept notes remain in
+  the ontology as data.
+* **Wiring is checked at start-up.** Read tools are dispatched through the same
+  `@bind` registry as the engine, and `ToolBox` verifies that the sections the
+  ontology declares match the ones the code renders.
 
 ## v1.1 plan: token parsimony and caching
 

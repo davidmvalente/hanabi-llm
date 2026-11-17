@@ -20,7 +20,7 @@ from .model import Color
 HN: Final = Namespace("https://example.org/hanabi#")
 
 #: Parameter types the ontology may use, mapped to JSON-schema in tools.py.
-PARAM_TYPES: Final = frozenset({"integer", "color", "rank", "player", "string"})
+PARAM_TYPES: Final = frozenset({"integer", "string", "color", "rank", "player", "choice", "topic"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,7 @@ class ParamSpec:
     type: str
     description: str
     optional: bool
+    choices: tuple[str, ...] = ()  # allowed values, for type "choice"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +41,11 @@ class AffordanceSpec:
     description: str
     params: tuple[ParamSpec, ...]
     ends_turn: bool
+    family: str  # action | state | rules
     required_checks: tuple[str, ...]  # checkFunction names run before applying
     effect_function: str
+    precondition_rules: tuple[str, ...]  # rule names that must hold first
+    effect_rules: tuple[str, ...]  # rule names applied when it resolves
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +70,18 @@ class RuleSet:
 
 
 @dataclass(frozen=True, slots=True)
+class RuleDoc:
+    """A rule as explained to a player (the `explain_rule` tool)."""
+
+    name: str
+    text: str
+    rationale: str
+    example: str
+    kind: str  # "precondition" | "effect" | "game rule"
+    applies_to: tuple[str, ...]  # tool names of the actions it concerns
+
+
+@dataclass(frozen=True, slots=True)
 class Concept:
     """A piece of game knowledge: a mechanic, a dynamic or a kinetic."""
 
@@ -81,6 +97,7 @@ class Ontology:
     rules: RuleSet
     affordances: dict[str, AffordanceSpec]  # keyed by function_name
     concepts: dict[str, Concept]  # keyed by concept name
+    rule_docs: dict[str, RuleDoc]  # keyed by rule name
 
     def referenced_functions(self) -> set[str]:
         """Every Python function name the ontology expects to exist."""
@@ -166,6 +183,7 @@ def _load_affordances(g: Graph) -> dict[str, AffordanceSpec]:
                     type=ptype,
                     description=_str(g, p, HN.paramDescription, ""),
                     optional=_bool(g, p, HN.optional, False),
+                    choices=tuple(c.strip() for c in _str(g, p, HN.choices, "").split(",") if c.strip()),
                 )
             )
         # Stable ordering: required parameters first, then by name.
@@ -177,16 +195,39 @@ def _load_affordances(g: Graph) -> dict[str, AffordanceSpec]:
             )
         )
         name = _str(g, aff, HN.functionName)
+        pre_rules = tuple(sorted(_str(g, r, HN.ruleName) for r in g.objects(aff, HN.requires)))
+        eff_rules = tuple(sorted(_str(g, r, HN.ruleName) for r in g.objects(aff, HN.appliesRule)))
         specs[name] = AffordanceSpec(
             iri=aff,
             function_name=name,
             description=_str(g, aff, HN.description),
             params=tuple(params),
             ends_turn=_bool(g, aff, HN.endsTurn, False),
+            family=_str(g, aff, HN.family),
             required_checks=checks,
             effect_function=_str(g, aff, HN.effectFunction),
+            precondition_rules=pre_rules,
+            effect_rules=eff_rules,
         )
     return specs
+
+
+def _load_rule_docs(g: Graph) -> dict[str, RuleDoc]:
+    docs: dict[str, RuleDoc] = {}
+    for rule in g.subjects(RDF.type, HN.Rule):
+        name = _str(g, rule, HN.ruleName)
+        required_by = {_str(g, a, HN.functionName) for a in g.subjects(HN.requires, rule)}
+        applied_by = {_str(g, a, HN.functionName) for a in g.subjects(HN.appliesRule, rule)}
+        kind = "precondition" if required_by else "effect" if applied_by else "game rule"
+        docs[name] = RuleDoc(
+            name=name,
+            text=_str(g, rule, HN.ruleText),
+            rationale=_str(g, rule, HN.rationale, ""),
+            example=_str(g, rule, HN.example, ""),
+            kind=kind,
+            applies_to=tuple(sorted(required_by | applied_by)),
+        )
+    return docs
 
 
 _CATEGORIES = {HN.Mechanic: "mechanic", HN.Dynamic: "dynamic", HN.Kinetic: "kinetic"}
@@ -217,6 +258,7 @@ def load_ontology() -> Ontology:
         rules=_load_rules(g),
         affordances=_load_affordances(g),
         concepts=_load_concepts(g),
+        rule_docs=_load_rule_docs(g),
     )
 
 

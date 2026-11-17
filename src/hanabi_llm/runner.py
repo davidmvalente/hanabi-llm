@@ -95,7 +95,6 @@ async def play_game(
     """
     if [p.name for p in players] != game.state.names:
         raise ValueError("player names must match the game's seat names, in order")
-    notes: dict[Seat, str] = {}
     traces: list[TurnTrace] = []
 
     def finish(status: GameStatus, fault: Fault | None, reason: str) -> GameResult:
@@ -107,9 +106,8 @@ async def play_game(
         ctx = TurnContext(
             seat=seat,
             view=view,
-            toolbox=ToolBox(game, seat, view, notes),
+            toolbox=ToolBox(game, seat, view),
             legal=tuple(game.legal_actions(seat)),
-            notes=notes.get(seat, ""),
         )
         try:
             async with asyncio.timeout(turn_timeout):

@@ -34,12 +34,12 @@ hn:Rank         a rdfs:Class ; rdfs:subClassOf hn:GameObject .
 hn:Stack        a rdfs:Class ; rdfs:subClassOf hn:GameObject .
 hn:Zone         a rdfs:Class ; rdfs:subClassOf hn:GameObject ;
                 rdfs:comment "A place where cards can be: deck, discard pile, a hand." .
-hn:Deck         a rdfs:Class ; rdfs:subClassOf hn:Zone .
 hn:DiscardPile  a rdfs:Class ; rdfs:subClassOf hn:Zone .
 hn:Hand         a rdfs:Class ; rdfs:subClassOf hn:Zone .
-hn:Token        a rdfs:Class ; rdfs:subClassOf hn:GameObject .
-hn:HintToken    a rdfs:Class ; rdfs:subClassOf hn:Token .
-hn:FuseToken    a rdfs:Class ; rdfs:subClassOf hn:Token .
+hn:Game         a rdfs:Class ; rdfs:comment "One game in progress; carries the turn state (turn number, deck size)." .
+hn:TokenState   a rdfs:Class ; rdfs:comment "A limited pool of tokens. Always: available + spent = capacity." .
+hn:HintState    a rdfs:Class ; rdfs:subClassOf hn:TokenState ; rdfs:comment "Hint tokens: spent to give hints, returned by discards and completed 5s." .
+hn:FuseState    a rdfs:Class ; rdfs:subClassOf hn:TokenState ; rdfs:comment "Fuse tokens: spent by misfires, never returned. The game ends when none is available." .
 hn:PlayerCountSetup a rdfs:Class ; rdfs:comment "Per-player-count setup constants." .
 
 hn:Action       a rdfs:Class ; rdfs:comment "A turn choice. Exactly one per turn." .
@@ -86,8 +86,14 @@ hn:maxHintTokens  a rdf:Property ; rdfs:range xsd:integer .
 hn:initialHintTokens a rdf:Property ; rdfs:range xsd:integer .
 hn:initialFuseTokens a rdf:Property ; rdfs:range xsd:integer .
 hn:maxFuseTokens  a rdf:Property ; rdfs:range xsd:integer .
-hn:hintTokensLeft a rdf:Property ; rdfs:range xsd:integer .
-hn:fuseTokensLeft a rdf:Property ; rdfs:range xsd:integer .
+hn:available      a rdf:Property ; rdfs:domain hn:TokenState ; rdfs:range xsd:integer ;
+                  rdfs:comment "Tokens that can still be used." .
+hn:capacity       a rdf:Property ; rdfs:domain hn:TokenState ; rdfs:range xsd:integer ;
+                  rdfs:comment "Size of the pool." .
+hn:spent          a rdf:Property ; rdfs:domain hn:TokenState ; rdfs:range xsd:integer ;
+                  rdfs:comment "Tokens currently used up: capacity minus available." .
+hn:choices        a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:string ;
+                  rdfs:comment "Comma-separated allowed values of a parameter of type choice, in display order." .
 hn:deckSize       a rdf:Property ; rdfs:range xsd:integer .
 
 hn:actor          a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Player .
@@ -122,6 +128,13 @@ hn:measuredBy     a rdf:Property ; rdfs:domain hn:Concept ;
 hn:conceptName    a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string .
 hn:endsTurn       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:boolean ;
                   rdfs:comment "True for the three actions; false for read-only or note-taking tools." .
+hn:family             a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:string ;
+                      rdfs:comment "Tool family: action (ends the turn), state or rules. Drives the prompt layout." .
+hn:ruleName           a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string ;
+                      rdfs:comment "Short model-facing name of the rule (what explain_rule accepts)." .
+hn:rationale          a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string ;
+                      rdfs:comment "Why the rule exists, in terms of how it shapes play." .
+hn:example            a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string .
 hn:affordanceAction   a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Action .
 hn:functionName       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:string ;
                       rdfs:comment "Name of the tool exposed to the model." .
@@ -129,7 +142,7 @@ hn:description        a rdf:Property ; rdfs:range xsd:string .
 hn:hasParameter       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Parameter .
 hn:paramName          a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:string .
 hn:paramType          a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:string ;
-                      rdfs:comment "One of: integer, color, rank, player." .
+                      rdfs:comment "One of: integer, string, color, rank, player (another player), choice (see hn:choices), topic (an action or rule name)." .
 hn:paramDescription   a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:string .
 hn:requires           a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Rule .
 hn:appliesRule        a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Rule .
@@ -173,79 +186,116 @@ hn:Setup4 a hn:PlayerCountSetup ; hn:playerCount 4 ; hn:handSize 4 .
 hn:Setup5 a hn:PlayerCountSetup ; hn:playerCount 5 ; hn:handSize 4 .
 
 # ---------------------------------------------------------------------------
-# 5. Rules (each one is enforced by a registered Python function)
+# 5. Rules
+#    Each rule has a model-facing name, its text, why it exists and an example
+#    (all shown by the explain_rule tool). Preconditions and effects are also
+#    bound by name to the Python function that enforces them.
 # ---------------------------------------------------------------------------
 
 hn:RuleHintTokenAvailable a hn:Rule ;
+    hn:ruleName "hint_token_available" ;
     hn:ruleText "A hint can only be given if at least one hint token is available." ;
+    hn:rationale "Hints are the team's only channel of communication. The token limit makes information a scarce resource that has to be earned back by discarding." ;
+    hn:example "With 0 hint tokens left you cannot give a hint; discarding a card returns one." ;
     hn:checkFunction "hint_token_available" .
 
 hn:RuleHintTargetIsOther a hn:Rule ;
+    hn:ruleName "hint_target_is_other" ;
     hn:ruleText "A hint must be given to another player, never to oneself." ;
+    hn:rationale "Nobody can see their own cards, so everything you learn about them has to come from a teammate." ;
+    hn:example "Alice may hint Bob or Carol, never Alice." ;
     hn:checkFunction "hint_target_is_other" .
 
 hn:RuleHintTouchesCards a hn:Rule ;
+    hn:ruleName "hint_touches_cards" ;
     hn:ruleText "A hint must match at least one card in the target's hand; it must reveal something." ;
+    hn:rationale "Keeps hints truthful and informative: you may only name a colour or rank that the target really holds." ;
+    hn:example "Bob holds no green card, so 'green' is not a legal hint for Bob." ;
     hn:checkFunction "hint_touches_cards" .
 
 hn:RuleHintExactlyOneAttribute a hn:Rule ;
+    hn:ruleName "hint_one_attribute" ;
     hn:ruleText "A hint names exactly one attribute: a colour or a rank, never both." ;
+    hn:rationale "Limits each hint to a single fact, which keeps the channel narrow and makes the choice of hint meaningful." ;
+    hn:example "'red' and '3' are legal hints; 'red 3' is not." ;
     hn:checkFunction "hint_one_attribute" .
 
 hn:RuleCardInHand a hn:Rule ;
+    hn:ruleName "card_in_hand" ;
     hn:ruleText "A played or discarded card must be in the acting player's hand at the given position." ;
+    hn:rationale "You can only act on cards you actually hold, and you refer to them by slot because you cannot see them." ;
+    hn:example "With 5 cards in hand the valid positions are 0 to 4." ;
     hn:checkFunction "card_in_hand" .
 
 hn:RuleHintRefund a hn:Rule ;
+    hn:ruleName "hint_refund" ;
     hn:ruleText "Discarding returns one hint token (up to the maximum). Completing a stack with a 5 also returns one hint token." ;
+    hn:rationale "Discards buy back information, and finishing a firework refinances the team." ;
+    hn:example "Discarding at 5 tokens gives 6. Discarding at the maximum of 8 gains nothing." ;
     hn:effectFunction "refund_hint" .
 
 hn:RuleMisfireCostsFuse a hn:Rule ;
+    hn:ruleName "misfire_costs_fuse" ;
     hn:ruleText "Playing a card that is not the next in its colour's stack discards it and costs one fuse token." ;
+    hn:rationale "Guessing has a price. Three misfires end the game, so risk has to be weighed against the information you hold." ;
+    hn:example "Playing a red 3 when the red stack stands at 1 loses a fuse and the card goes to the discard pile." ;
     hn:checkFunction "play_is_legal_or_misfire" .
 
 hn:RuleGameEnds a hn:Rule ;
-    hn:ruleText "The game ends when fuses reach zero, all five stacks are complete, or after the final round when the deck is empty." ;
+    hn:ruleName "game_ends" ;
+    hn:ruleText "The game ends when fuses reach zero, when all five stacks are complete, or after the final round once the deck is empty." ;
+    hn:rationale "Defines the three ways a game finishes: failure, a perfect score, or running out of time." ;
+    hn:example "Losing the third fuse ends the game at once." ;
     hn:checkFunction "game_is_over" .
 
 hn:RuleDeckRunsOut a hn:Rule ;
+    hn:ruleName "deck_runs_out" ;
     hn:ruleText "When the deck is empty, each player gets one final turn, then the game ends." ;
+    hn:rationale "Gives the game a deadline, so the team must convert what it knows into plays before time runs out." ;
+    hn:example "If the last card is drawn on turn 30 in a 3-player game, turns 31, 32 and 33 are the final round." ;
     hn:checkFunction "final_round_done" .
 
 # ---------------------------------------------------------------------------
-# 6. Affordances (what a player may do on their turn)
+# 6. Affordances: the tools offered to a player. Exactly three families,
+#    mutually exclusive and together exhaustive:
+#      action : change the game (the only family that ends the turn)
+#      state  : read what is true now
+#      rules  : read how the game works
+#    (Strategy notes, odds helpers and private memory are deliberately NOT
+#    offered in the first experiment; they change what is being measured.)
 # ---------------------------------------------------------------------------
 
+# --- family: action -------------------------------------------------------------
+
 hn:AffPlayCard a hn:Affordance ;
-    hn:endsTurn true ;
+    hn:family "action" ; hn:endsTurn true ;
     hn:affordanceAction hn:PlayCard ;
     hn:functionName "play_card" ;
-    hn:description "Play a card from your own hand. If it is the next card of its colour's stack it is placed; otherwise it is discarded and a fuse token is lost. You cannot see your own cards." ;
+    hn:description "ACTION (ends your turn). Play a card from your own hand. If it is the next card of its colour's firework it is placed; otherwise it is discarded and a fuse token is spent. You cannot see your own cards." ;
     hn:requires hn:RuleCardInHand ;
     hn:appliesRule hn:RuleMisfireCostsFuse, hn:RuleHintRefund ;
     hn:effectFunction "apply_play_card" ;
     hn:hasParameter hn:ParamPlayPosition .
 
 hn:AffDiscardCard a hn:Affordance ;
-    hn:endsTurn true ;
+    hn:family "action" ; hn:endsTurn true ;
     hn:affordanceAction hn:DiscardCard ;
     hn:functionName "discard_card" ;
-    hn:description "Discard one card from your own hand to the discard pile, which is public. Returns one hint token, up to the maximum." ;
+    hn:description "ACTION (ends your turn). Discard one card from your own hand to the public discard pile. Gives back one hint token if any is spent." ;
     hn:requires hn:RuleCardInHand ;
     hn:appliesRule hn:RuleHintRefund ;
     hn:effectFunction "apply_discard_card" ;
     hn:hasParameter hn:ParamDiscardPosition .
 
 hn:AffGiveHint a hn:Affordance ;
-    hn:endsTurn true ;
+    hn:family "action" ; hn:endsTurn true ;
     hn:affordanceAction hn:GiveHint ;
     hn:functionName "give_hint" ;
-    hn:description "Spend one hint token to tell another player about every card in their hand of one colour OR one rank. Hints reveal the positions of all matching cards." ;
+    hn:description "ACTION (ends your turn). Spend one hint token to tell another player about every card in their hand of one colour OR one rank. Reveals the positions of all matching cards." ;
     hn:requires hn:RuleHintTokenAvailable, hn:RuleHintTargetIsOther, hn:RuleHintTouchesCards, hn:RuleHintExactlyOneAttribute ;
     hn:effectFunction "apply_give_hint" ;
     hn:hasParameter hn:ParamHintTarget, hn:ParamHintColor, hn:ParamHintRank .
 
-# Parameters. Each becomes a JSON-schema property in the tool definition.
 hn:ParamPlayPosition a hn:Parameter ;
     hn:paramName "position" ; hn:paramType "integer" ;
     hn:paramDescription "Slot index (0-based) of the card in your hand to play." .
@@ -260,79 +310,45 @@ hn:ParamHintTarget a hn:Parameter ;
 
 hn:ParamHintColor a hn:Parameter ;
     hn:paramName "color" ; hn:paramType "color" ; hn:optional true ;
-    hn:paramDescription "Colour to reveal (red, yellow, green, blue, white). Omit when giving a rank hint." .
+    hn:paramDescription "Colour to reveal. Omit when giving a rank hint." .
 
 hn:ParamHintRank a hn:Parameter ;
     hn:paramName "rank" ; hn:paramType "rank" ; hn:optional true ;
     hn:paramDescription "Rank to reveal (1-5). Omit when giving a colour hint." .
 
-# Read-only affordance: the model may query its own knowledge graph at any time.
-hn:AffQueryKnowledge a hn:Affordance ;
-    hn:endsTurn false ;
-    hn:functionName "query_knowledge" ;
-    hn:description "Run a read-only SPARQL SELECT over the knowledge graph you are allowed to see. Use it to check what you know about cards, hints, stacks and tokens." ;
-    hn:effectFunction "run_sparql_select" ;
-    hn:hasParameter hn:ParamQuery .
-
-hn:ParamQuery a hn:Parameter ;
-    hn:paramName "sparql" ; hn:paramType "string" ;
-    hn:paramDescription "A SPARQL SELECT query using the prefix hn: <https://example.org/hanabi#>." .
-
-# Private scratchpad: lets a model carry its reasoning to its own next turn.
-# Notes are visible only to their author; they are not part of the game state.
-hn:AffTakeNotes a hn:Affordance ;
-    hn:endsTurn false ;
-    hn:functionName "take_notes" ;
-    hn:description "Save private notes for your own future turns (for example your inferences about your hand). Replaces your previous notes. Nobody else can read them, and they do not count as an action." ;
-    hn:effectFunction "store_notes" ;
-    hn:hasParameter hn:ParamNotes .
-
-hn:ParamNotes a hn:Parameter ;
-    hn:paramName "notes" ; hn:paramType "string" ;
-    hn:paramDescription "Free text, kept short." .
-
-# ---------------------------------------------------------------------------
-# 7. Read-only affordances: they never end the turn and may be called any
-#    number of times (within the per-turn call budget).
-# ---------------------------------------------------------------------------
-
-hn:AffGetRules a hn:Affordance ;
-    hn:endsTurn false ;
-    hn:functionName "get_rules" ;
-    hn:description "Return the rules of the game: setup constants, card distribution, and every rule." ;
-    hn:effectFunction "describe_rules" .
+# --- family: state ----------------------------------------------------------------
+# The sections partition everything a player may see, with no overlap:
+#   turn      whose turn, turn number, cards left in the deck, final round, game over
+#   tokens    hint tokens and fuse tokens (available / spent / capacity)
+#   fireworks the five stacks, what each needs next, and the score
+#   discard   the public discard pile
+#   hands     every hand: teammates' cards, and what each hand has been told
+#   history   the most recent events
 
 hn:AffGetState a hn:Affordance ;
-    hn:endsTurn false ;
+    hn:family "state" ; hn:endsTurn false ;
     hn:functionName "get_state" ;
-    hn:description "Return the current game state as you are allowed to see it: stacks, tokens, discard pile, other players' hands, what hints have told you about your own cards, and recent events." ;
-    hn:effectFunction "describe_state" .
+    hn:description "Read the game state as you are allowed to see it. Give a `section` to read one part, or omit it to read everything. You can never see your own cards, only what hints told you about them." ;
+    hn:effectFunction "tool_get_state" ;
+    hn:hasParameter hn:ParamStateSection .
 
-hn:AffGetConcepts a hn:Affordance ;
-    hn:endsTurn false ;
-    hn:functionName "get_concepts" ;
-    hn:description "Consult game-theory notes. With no arguments, list all concepts. Give `category` (mechanic, dynamic or kinetic) to filter, or `name` to read one concept in full, with strategic guidance." ;
-    hn:effectFunction "describe_concepts" ;
-    hn:hasParameter hn:ParamConceptCategory, hn:ParamConceptName .
+hn:ParamStateSection a hn:Parameter ;
+    hn:paramName "section" ; hn:paramType "choice" ; hn:optional true ;
+    hn:choices "turn, tokens, fireworks, discard, hands, history" ;
+    hn:paramDescription "Part of the state to read. Omit for all sections." .
 
-hn:ParamConceptCategory a hn:Parameter ;
-    hn:paramName "category" ; hn:paramType "string" ; hn:optional true ;
-    hn:paramDescription "One of: mechanic, dynamic, kinetic." .
+# --- family: rules ----------------------------------------------------------------
 
-hn:ParamConceptName a hn:Parameter ;
-    hn:paramName "name" ; hn:paramType "string" ; hn:optional true ;
-    hn:paramDescription "Concept name as listed by get_concepts, for the full text." .
+hn:AffExplainRules a hn:Affordance ;
+    hn:family "rules" ; hn:endsTurn false ;
+    hn:functionName "explain_rules" ;
+    hn:description "Explain how the game works. Without a `topic`, list the actions and every rule. With an action name, explain what it does, its parameters, and the rules that apply to it. With a rule name, give the rule, why it exists and an example." ;
+    hn:effectFunction "tool_explain_rules" ;
+    hn:hasParameter hn:ParamTopic .
 
-hn:AffEstimateCard a hn:Affordance ;
-    hn:endsTurn false ;
-    hn:functionName "estimate_card" ;
-    hn:description "Estimate what one of YOUR OWN cards could be, by counting the copies you cannot see (not in other hands, the discard pile or the stacks) and applying what hints told you. Returns the candidate identities with probabilities, plus the chance the card is playable now. Approximate: treats your cards independently." ;
-    hn:effectFunction "estimate_card_probabilities" ;
-    hn:hasParameter hn:ParamEstimatePosition .
-
-hn:ParamEstimatePosition a hn:Parameter ;
-    hn:paramName "position" ; hn:paramType "integer" ;
-    hn:paramDescription "Slot index (0-based) of the card in your own hand." .
+hn:ParamTopic a hn:Parameter ;
+    hn:paramName "topic" ; hn:paramType "topic" ; hn:optional true ;
+    hn:paramDescription "An action name (play_card, discard_card, give_hint) or a rule name. Omit for the overview." .
 
 # ---------------------------------------------------------------------------
 # 8. Game knowledge: mechanics, dynamics, kinetics
@@ -356,7 +372,7 @@ hn:HandShift a hn:Mechanic ; hn:conceptName "hand_shift" ;
 
 hn:HintRefund a hn:Mechanic ; hn:conceptName "hint_refund" ;
     hn:summary "Discarding returns one hint token (never above the maximum). Completing a stack with its 5 also returns one." ;
-    hn:measuredBy hn:hintTokensLeft ;
+    hn:measuredBy hn:HintState ;
     hn:guidance "Discarding when you are already at the maximum gains nothing: prefer a useful hint or a safe play then." .
 
 hn:FinalRound a hn:Mechanic ; hn:conceptName "final_round" ;
@@ -368,7 +384,7 @@ hn:FinalRound a hn:Mechanic ; hn:conceptName "final_round" ;
 
 hn:HintDiscardCycle a hn:Dynamic ; hn:conceptName "hint_discard_cycle" ;
     hn:summary "Hints are spent to move information; discards (and completed 5s) recover them. The team trades card supply for information supply." ;
-    hn:measuredBy hn:hintTokensLeft ;
+    hn:measuredBy hn:HintState ;
     hn:guidance "With few tokens left, a discard is how you buy the next hint. With many, spend them on hints that unlock plays instead of discarding good cards." .
 
 hn:GamePhases a hn:Dynamic ; hn:conceptName "game_phases" ;
@@ -416,7 +432,7 @@ hn:HintTorque a hn:Kinetic ; hn:conceptName "hint_torque" ;
 
 hn:ActivationEnergy a hn:Kinetic ; hn:conceptName "activation_energy" ;
     hn:summary "The certainty you need before playing. The barrier is the fuse token you lose if you are wrong." ;
-    hn:measuredBy hn:fuseTokensLeft ;
+    hn:measuredBy hn:FuseState ;
     hn:guidance "Use estimate_card. With 3 fuses play at moderate odds; with 1 fuse require near certainty." .
 
 hn:CollisionRate a hn:Kinetic ; hn:conceptName "collision_rate" ;
@@ -425,5 +441,5 @@ hn:CollisionRate a hn:Kinetic ; hn:conceptName "collision_rate" ;
 
 hn:PotentialEnergy a hn:Kinetic ; hn:conceptName "potential_energy" ;
     hn:summary "Hint tokens are stored potential: spending one converts it into information; discarding refills the store." ;
-    hn:measuredBy hn:hintTokensLeft ;
+    hn:measuredBy hn:HintState ;
     hn:guidance "Do not hoard tokens: unspent potential at the end of the game is wasted." .

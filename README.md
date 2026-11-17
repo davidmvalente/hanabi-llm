@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 59 tests, no network needed
+uv run pytest                       # 79 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -23,8 +23,9 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 | `registry.py` | `@bind("name")` registry that connects ontology names to Python functions |
 | `engine.py` | Authoritative state, legal-move enumeration, rule enforcement, event log |
 | `views.py` | Per-seat redacted projection -> RDF graph + prompt text (the only place secrets are removed) |
-| `tools.py` | Affordances -> OpenAI-style tool schemas; validates calls; read tools (state, rules, concepts, odds, SPARQL, notes) |
-| `estimates.py` | Card-counting odds for a player's own cards, computed from their view only |
+| `tools.py` | Affordances -> OpenAI-style tool schemas; validates actions; dispatches the read tools |
+| `states.py` | The state a player may see, as six sections that partition it (turn, tokens, fireworks, discard, hands, history) |
+| `explain.py` | Rule and action explanations, generated from the ontology |
 | `faults.py` | Who is to blame when a game cannot finish (model vs infrastructure) |
 | `llm.py` | Async OpenRouter client (retries, typed result) |
 | `players.py` | `LLMPlayer` (tool loop for one turn), `RandomPlayer` |
@@ -48,12 +49,18 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   its call budget aborts the game as a *model fault*; a provider failure or
   timeout aborts it as an *infrastructure fault*. Aborted games are never
   ranked. See `docs/AUDIT.md`.
-* **Game knowledge in the graph.** Mechanics, dynamics and kinetics (mass,
-  inertia, torque, activation energy, collision rate...) are `hn:Concept`
-  nodes in the ontology, readable with `get_concepts` or SPARQL.
-* **A turn.** Read tools (`get_state`, `get_rules`, `get_concepts`,
-  `estimate_card`, `query_knowledge`, `take_notes`) are free and repeatable
-  within a per-turn call budget; the first accepted action tool ends the turn.
+* **Five tools, three families** (mutually exclusive, together exhaustive):
+  *action* (`play_card`, `discard_card`, `give_hint`; the first accepted one
+  ends the turn), *state* (`get_state`, optionally one `section`) and *rules*
+  (`explain_rules`, optionally one `topic`: an action or a rule, with its
+  rationale and an example). Read tools are free within a per-turn call budget.
+* **One vocabulary for tokens.** Hint and fuse tokens are both a pool with
+  `available`, `spent` and `capacity`, where `spent = capacity - available`;
+  refunds just raise `available`.
+* **Deliberately left out of experiment 1:** card-odds helpers, a card census,
+  strategy notes (the mechanics/dynamics/kinetics concepts stay in the
+  ontology as data), private notes and dry-run helpers. Each changes what the
+  experiment measures; see `docs/AUDIT.md`.
 
 ## Conventions worth knowing
 
@@ -65,5 +72,5 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   `score` is the sum of the stacks.
 * Seats are named Alice, Bob, ... never after the model, so models cannot
   identify each other. The seat -> model map is only in the log header.
-* Each model turn is stateless apart from the model's private `take_notes`
-  memory: the full current view is re-sent every turn (v1.1 plan: `docs/AUDIT.md`).
+* Each model turn is stateless: the full current state is re-sent every turn
+  and models have no private memory (v1.1 plan: `docs/AUDIT.md`).
