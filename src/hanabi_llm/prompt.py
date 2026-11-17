@@ -20,7 +20,8 @@ from typing import Any
 
 import yaml
 
-_FILE = "system.v{version}.yaml"
+_FILE = "{kind}.v{version}.yaml"
+KINDS = ("system", "rerank")  # system: the chat prompt; rerank: the query for a rerank model
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,7 @@ class PromptSpec:
     variables: tuple[str, ...]
     template: str
     sha256: str  # of the raw file, logged with every game
+    kind: str = "system"
 
     def render(self, **values: object) -> str:
         """Fill the placeholders. The keys must be exactly the declared variables."""
@@ -38,25 +40,27 @@ class PromptSpec:
         return Template(self.template).substitute({k: str(v) for k, v in values.items()})
 
 
-def available_versions() -> list[int]:
-    """Versions present on disk, ascending."""
+def available_versions(kind: str = "system") -> list[int]:
+    """Versions of one kind of prompt present on disk, ascending."""
     names = (p.name for p in resources.files("hanabi_llm").joinpath("prompts").iterdir())
-    found = (re.fullmatch(r"system\.v(\d+)\.yaml", n) for n in names)
+    found = (re.fullmatch(rf"{re.escape(kind)}\.v(\d+)\.yaml", n) for n in names)
     return sorted(int(m.group(1)) for m in found if m)
 
 
-def load_prompt(version: int | str | None = None) -> PromptSpec:
-    """Load ``system.v<version>.yaml`` (the latest if ``version`` is omitted). Accepts 2 or "v2"."""
+def load_prompt(version: int | str | None = None, kind: str = "system") -> PromptSpec:
+    """Load ``<kind>.v<version>.yaml`` (the latest if ``version`` is omitted). Accepts 2 or "v2"."""
+    if kind not in KINDS:
+        raise ValueError(f"unknown prompt kind {kind!r}; kinds: {list(KINDS)}")
     if version is None:
-        version = available_versions()[-1]
+        version = available_versions(kind)[-1]
     number = int(str(version).lower().removeprefix("v"))
-    path = resources.files("hanabi_llm").joinpath("prompts", _FILE.format(version=number))
+    path = resources.files("hanabi_llm").joinpath("prompts", _FILE.format(kind=kind, version=number))
     if not path.is_file():
-        raise ValueError(f"no prompt version {number}; available: {available_versions()}")
-    return parse_prompt(path.read_bytes(), number)
+        raise ValueError(f"no {kind} prompt version {number}; available: {available_versions(kind)}")
+    return parse_prompt(path.read_bytes(), number, kind)
 
 
-def parse_prompt(raw: bytes, expected_version: int) -> PromptSpec:
+def parse_prompt(raw: bytes, expected_version: int, kind: str = "system") -> PromptSpec:
     """Validate and build a ``PromptSpec`` from the bytes of a prompt file."""
     number = expected_version
     data: Any = yaml.safe_load(raw)
@@ -72,4 +76,4 @@ def parse_prompt(raw: bytes, expected_version: int) -> PromptSpec:
     used = set(Template(template).get_identifiers())
     if used != set(declared):
         raise ValueError(f"prompt v{number}: declared variables {sorted(declared)} != placeholders used {sorted(used)}")
-    return PromptSpec(number, str(data["description"]).strip(), declared, template, hashlib.sha256(raw).hexdigest())
+    return PromptSpec(number, str(data["description"]).strip(), declared, template, hashlib.sha256(raw).hexdigest(), kind)

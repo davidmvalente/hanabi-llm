@@ -53,4 +53,5 @@ async def main(out: Path, seed: int, n: int):
     w.write(result_record(result)); w.close()
     print(f"seed {seed}: {result.status.value}, {result.reason}, score {result.score}, turns {result.turns}")
 
-asyncio.run(main(Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])))
+if __name__ == "__main__":
+    asyncio.run(main(Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])))

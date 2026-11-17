@@ -20,7 +20,7 @@ def test_loads_the_latest_version_by_default() -> None:
 
 
 def test_unknown_version_is_an_error() -> None:
-    with pytest.raises(ValueError, match="no prompt version 9"):
+    with pytest.raises(ValueError, match="no system prompt version 9"):
         load_prompt(9)
 
 

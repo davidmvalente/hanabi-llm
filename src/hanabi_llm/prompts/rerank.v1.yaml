@@ -1,0 +1,22 @@
+# Query for a RERANK model (version 1).
+#
+# A reranker cannot call tools or reason in turns: it scores a list of documents against one query.
+# So the query carries everything the model needs (goal, rules, state) and the documents are the
+# candidate actions. Keep it short: it is sent once per turn, with every action as a document.
+#
+# Released versions are never edited; add rerank.v2.yaml. Version and sha256 go in the log header.
+version: 1
+description: Goal, rules and state in one short query; the candidate actions are the documents.
+variables: [name, players, rules, state]
+system: |
+  You are ${name}, playing the cooperative card game Hanabi with ${players}.
+  Goal: together build the five coloured stacks, each from rank 1 up to rank 5; the team score is the number of cards placed.
+  You cannot see your own cards. The only way to communicate is a hint.
+
+  Rules:
+  ${rules}
+
+  Current state:
+  ${state}
+
+  Which single action should ${name} take now?

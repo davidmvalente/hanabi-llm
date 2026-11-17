@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 188 tests, no network needed
+uv run pytest                       # 258 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -15,6 +15,8 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 ```
 
 > Status and how it was tested: [`docs/FIRST_DRAFT.md`](docs/FIRST_DRAFT.md). Never yet run against a real model.
+>
+> **This branch (`rerankers-version`)** adds `--mode rerank`: players that are rerank models scoring a list of candidate action strings, with no tools. See [`docs/RERANK.md`](docs/RERANK.md).
 
 ## Layout
 
@@ -28,6 +30,7 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 | `tools.py` | Affordances -> OpenAI-style tool schemas; validates actions; dispatches the read tools |
 | `narrate.py` | The one wording of events (typed segments, flattened to text), shared by the prompt history, the CLI and the viewer |
 | `knowledge/` | Optional knowledge graphs (notes models may consult); none in the baseline. See `docs/KNOWLEDGE.md` |
+| `actions.py`, `rerank.py`, `rerank_player.py` | Rerank mode: candidate actions as strings, the OpenRouter rerank client, and a player that plays the best-scored action |
 | `feed.py`, `fold.py` | The game feed (JSONL), the observer projection, and the fold: the one state machine, used by the engine, the viewer and the tests |
 | `scripts/` | A heuristic demo bot and the headless-browser check of the viewer (`scripts/check_viewer.sh`) |
 | `viewer.py`, `web/` | Live viewer: follows a feed and streams folded states to a one-page browser UI |

@@ -116,6 +116,14 @@ _RENDERERS = {"turn": _turn, "tokens": _tokens, "fireworks": _fireworks,
 assert tuple(_RENDERERS) == SECTIONS
 
 
+def compact_state_text(view: PlayerView, rules: RuleSet, events: int = 5) -> str:
+    """The state for a short prompt: every section except the history, plus only the last few events."""
+    parts = [f"## {k}\n{_RENDERERS[k](view, rules)}" for k in SECTIONS if k != "history"]
+    recent = view.events[-events:]
+    parts.append("## recent events\n" + ("\n".join("  " + describe_event(e, view) for e in recent) if recent else "none yet"))
+    return "\n\n".join(parts)
+
+
 def state_text(view: PlayerView, rules: RuleSet, section: str | None = None) -> str:
     """One section, or (with ``section=None``) all of them in order."""
     if section is not None:

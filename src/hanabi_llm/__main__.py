@@ -1,5 +1,8 @@
 """CLI: ``uv run hanabi-llm --models modelA,modelB`` (use ``random`` for a bot).
 
+Two modes. ``--mode chat`` (default): models are chat models that call tools. ``--mode rerank``:
+models are RERANK models; each turn is one call that scores the candidate actions (see docs/RERANK.md).
+
 Two optional output files, both JSONL and flushed line by line:
 
   --log   the game FEED: header with the initial deal, one record per event,
@@ -26,10 +29,13 @@ import httpx
 from .engine import Game
 from .faults import GameStatus
 from .feed import FeedWriter, action_record, event_record, header_record, result_record
+from .actions import CANDIDATE_SETS
 from .llm import OPENROUTER_URL, OpenRouterClient
 from .ontology import available_knowledge, load_ontology
 from .players import LLMPlayer, Player, RandomPlayer
 from .prompt import load_prompt
+from .rerank import OPENROUTER_RERANK_URL, OpenRouterRerankClient
+from .rerank_player import RerankPlayer
 from .runner import GameResult, TurnTrace, play_game
 from .views import narrate_event
 
@@ -47,7 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-calls", type=int, default=8, help="model calls allowed per turn")
     ap.add_argument("--max-failed-actions", type=int, default=3, help="rejected actions per turn before a model fault")
     ap.add_argument("--knowledge", default="", help=f"comma-separated knowledge graphs to offer ({', '.join(available_knowledge())}); default: none, the baseline")
-    ap.add_argument("--api-url", default=OPENROUTER_URL, help="chat-completions endpoint (OpenRouter by default; any OpenAI-compatible server works)")
+    ap.add_argument("--mode", choices=("chat", "rerank"), default="chat", help="chat: tool-calling chat models; rerank: models that score candidate actions")
+    ap.add_argument("--candidates", choices=CANDIDATE_SETS, default="legal", help="rerank mode: offer only legal actions, or every action incl. impossible hints")
+    ap.add_argument("--no-shuffle", action="store_true", help="rerank mode: keep the documents in canonical order instead of a seeded shuffle")
+    ap.add_argument("--api-url", default=None, help="endpoint (default: OpenRouter's chat-completions, or its rerank endpoint in rerank mode)")
     ap.add_argument("--prompt", default=None, help="system prompt version, e.g. v1 (default: latest)")
     ap.add_argument("--audit", action="store_true", help="SHACL-validate the truth and every view after each turn (slow; needs pyshacl)")
     ap.add_argument("--temperature", type=float, default=0.3)
@@ -66,16 +75,24 @@ async def run(args: argparse.Namespace) -> GameResult:
 
     seed = args.seed if args.seed is not None else secrets.randbelow(2**31)
     names = list(SEAT_NAMES[: len(models)])
-    onto = load_ontology([k.strip() for k in args.knowledge.split(",") if k.strip()])
+    rerank = args.mode == "rerank"
+    knowledge = [k.strip() for k in args.knowledge.split(",") if k.strip()]
+    if rerank and knowledge:
+        sys.exit("knowledge graphs need the get_concepts tool, which rerank models cannot call")
+    onto = load_ontology(knowledge)
     game = Game(names, seed=seed, ontology=onto)
-    prompt = load_prompt(args.prompt)
+    prompt = load_prompt(args.prompt, kind="rerank" if rerank else "system")
+    api_url = args.api_url or (OPENROUTER_RERANK_URL if rerank else OPENROUTER_URL)
     feed = FeedWriter(args.log) if args.log else None
     trace = FeedWriter(args.trace) if args.trace else None
 
-    config = {
-        "temperature": args.temperature, "max_tokens": args.max_tokens, "max_calls": args.max_calls,
-        "max_failed_actions": args.max_failed_actions, "knowledge": list(onto.knowledge), "prompt": {"version": prompt.version, "sha256": prompt.sha256},
-    }
+    prompt_info = {"kind": prompt.kind, "version": prompt.version, "sha256": prompt.sha256}
+    if rerank:
+        config: dict[str, Any] = {"mode": "rerank", "candidates": args.candidates, "shuffle": not args.no_shuffle,
+                                  "max_failed_actions": args.max_failed_actions, "knowledge": [], "prompt": prompt_info}
+    else:
+        config = {"mode": "chat", "temperature": args.temperature, "max_tokens": args.max_tokens, "max_calls": args.max_calls,
+                  "max_failed_actions": args.max_failed_actions, "knowledge": list(onto.knowledge), "prompt": prompt_info}
     if feed:  # the header carries the initial deal, so it is written before anything is played
         feed.write(header_record(game, dict(zip(names, models, strict=True)), config))
 
@@ -102,8 +119,11 @@ async def run(args: argparse.Namespace) -> GameResult:
             for seat, (name, model) in enumerate(zip(names, models, strict=True)):
                 if model == "random":
                     players.append(RandomPlayer(name, seed=seed + seat))
+                elif rerank:
+                    players.append(RerankPlayer(name, OpenRouterRerankClient(model, api_key, http, url=api_url), game, seat, prompt=prompt,
+                                                candidates=args.candidates, shuffle=not args.no_shuffle, max_failed_actions=args.max_failed_actions))
                 else:
-                    client = OpenRouterClient(model, api_key, http, temperature=args.temperature, max_tokens=args.max_tokens, url=args.api_url)
+                    client = OpenRouterClient(model, api_key, http, temperature=args.temperature, max_tokens=args.max_tokens, url=api_url)
                     players.append(LLMPlayer(name, client, game, seat, prompt=prompt, max_calls=args.max_calls,
                                              max_failed_actions=args.max_failed_actions))
             result = await play_game(game, players, on_turn=on_turn, turn_timeout=args.turn_timeout)
