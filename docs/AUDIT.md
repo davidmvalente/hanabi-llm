@@ -92,6 +92,25 @@ The tool set is exactly three families, with no overlap and nothing missing:
   `@bind` registry as the engine, and `ToolBox` verifies that the sections the
   ontology declares match the ones the code renders.
 
+## Ontology and epistemics cleanup
+
+* **Defects fixed:** `hn:Game` is declared; `hn:Setup` is typed (`hn:GameSetup`); an
+  effect function on a rule no longer breaks a domain (`hn:Executable` is the common
+  parent of rules and affordances); the lint then found two more, `hn:turnNumber`
+  (used on both events and the game) and `hn:identityVisibility` (stated on classes).
+* **Dead and confusing vocabulary removed:** `hn:GameObject`, the `hn:Action` family and
+  `hn:affordanceAction` (they duplicated the affordance and the event), and an unused
+  fuse constant. Events now point at the affordance they exercise (`hn:exercises`).
+* **Lint** (`tests/test_ontology_lint.py`): types and referenced terms are declared, no
+  untyped data, domains and ranges hold on the ontology *and on every graph the code
+  emits over whole games*, no dead classes or properties, the documentation is
+  complete, and the bound functions equal the functions the ontology names, in both
+  directions. Each of six re-introduced defects is caught.
+* **Epistemics** is declared in one place and enforced three ways; see
+  `docs/EPISTEMICS.md`. SHACL catches nine deliberate corruptions (`tests/test_validate.py`).
+* **Not done:** the event-sourced state with diachronic per-turn graphs (option B). The
+  audit costs about 1.3 s per turn for three seats, so it is opt-in (`--audit`).
+
 ## v1.1 plan: token parsimony and caching
 
 **Is the conversation cached?** Partly, and not as a "thread". Each API call is

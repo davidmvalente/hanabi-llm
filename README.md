@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 91 tests, no network needed
+uv run pytest                       # 122 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -24,6 +24,7 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 | `engine.py` | Authoritative state, legal-move enumeration, rule enforcement, event log |
 | `views.py` | Per-seat redacted projection -> RDF graph + prompt text (the only place secrets are removed) |
 | `tools.py` | Affordances -> OpenAI-style tool schemas; validates actions; dispatches the read tools |
+| `validate.py`, `shapes/` | Ground-truth graph and SHACL audit: structure, conservation and the epistemic regime, checked on every graph |
 | `states.py` | The state a player may see, as six sections that partition it (turn, tokens, fireworks, discard, hands, history) |
 | `explain.py` | Rule and action explanations, generated from the ontology |
 | `faults.py` | Who is to blame when a game cannot finish (model vs infrastructure) |
@@ -61,6 +62,10 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   lists: models learn those through `explain_rules` and `get_state`. Released
   versions are never edited; add `system.v2.yaml` instead. The version and
   sha256 go in every log header (`--prompt v1`).
+* **Epistemics is declared once** (ontology section 7: who may see the identity of
+  the cards in each zone), interpreted in `views.build_view`, and enforced by SHACL
+  shapes and non-interference tests. `docs/EPISTEMICS.md` has the four layers and
+  where each lives. `--audit` SHACL-validates the truth and every view each turn.
 * **One vocabulary for tokens.** Hint and fuse tokens are both a pool with
   `available`, `spent` and `capacity`, where `spent = capacity - available`;
   refunds just raise `available`.

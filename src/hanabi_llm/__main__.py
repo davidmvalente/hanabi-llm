@@ -65,7 +65,14 @@ async def run(args: argparse.Namespace) -> GameResult:
     }
     _write(log, {"type": "header", **config})
 
+    if args.audit:
+        from .validate import audit  # needs pyshacl; imported only when asked for
+
+        audit(game)  # the freshly dealt game must already conform
+
     def on_turn(t: TurnTrace) -> None:
+        if args.audit:
+            audit(game)  # a violation is a bug in this code, never a model's fault: fail loudly
         print(f"turn {t.turn:>3}  {t.player:<6} {t.action.affordance} {dataclasses.asdict(t.action)}")
         _write(log, {"type": "turn", "turn": t.turn, "player": t.player, "action": t.action, "events": t.events,
                      "messages": t.messages, "tokens": [t.prompt_tokens, t.completion_tokens]})
@@ -95,6 +102,7 @@ def main() -> None:
     ap.add_argument("--max-calls", type=int, default=8, help="model calls allowed per turn")
     ap.add_argument("--max-failed-actions", type=int, default=3, help="rejected actions per turn before a model fault")
     ap.add_argument("--prompt", default=None, help="system prompt version, e.g. v1 (default: latest)")
+    ap.add_argument("--audit", action="store_true", help="SHACL-validate the truth and every view after each turn (slow; needs pyshacl)")
     ap.add_argument("--temperature", type=float, default=0.3)
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--turn-timeout", type=float, default=300.0, help="safety net in seconds; trips as an INFRA fault")

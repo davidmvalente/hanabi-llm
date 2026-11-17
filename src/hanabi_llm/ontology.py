@@ -9,6 +9,7 @@ function that the engine has not implemented.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from importlib import resources
 from typing import Any, Final
 
@@ -81,6 +82,28 @@ class RuleDoc:
     applies_to: tuple[str, ...]  # tool names of the actions it concerns
 
 
+class Visibility(StrEnum):
+    """Who may see the identity of the cards in a zone (``hn:Visibility`` in the ontology)."""
+
+    PUBLIC = "Public"
+    HIDDEN_FROM_HOLDER = "HiddenFromHolder"
+    HIDDEN_FROM_ALL = "HiddenFromAll"
+
+
+@dataclass(frozen=True, slots=True)
+class Regime:
+    """The information regime, as declared in the ontology's epistemics section."""
+
+    hand: Visibility
+    discard: Visibility
+    stack: Visibility
+    deck: Visibility
+
+    def hand_identity_visible(self, viewer: int, holder: int) -> bool:
+        """May ``viewer`` see the identity of a card held by ``holder``?"""
+        return self.hand is Visibility.PUBLIC or (self.hand is Visibility.HIDDEN_FROM_HOLDER and viewer != holder)
+
+
 @dataclass(frozen=True, slots=True)
 class Concept:
     """A piece of game knowledge: a mechanic, a dynamic or a kinetic."""
@@ -98,6 +121,7 @@ class Ontology:
     affordances: dict[str, AffordanceSpec]  # keyed by function_name
     concepts: dict[str, Concept]  # keyed by concept name
     rule_docs: dict[str, RuleDoc]  # keyed by rule name
+    regime: Regime
 
     def referenced_functions(self) -> set[str]:
         """Every Python function name the ontology expects to exist."""
@@ -230,6 +254,26 @@ def _load_rule_docs(g: Graph) -> dict[str, RuleDoc]:
     return docs
 
 
+def _load_regime(g: Graph) -> Regime:
+    """Read the declared regime and refuse any combination the engine cannot honour."""
+
+    def vis(zone: URIRef) -> Visibility:
+        node = g.value(zone, HN.identityVisibility)
+        if node is None:
+            raise ValueError(f"ontology: {zone} has no hn:identityVisibility")
+        return Visibility(str(node).split("#")[1])
+
+    regime = Regime(hand=vis(HN.Hand), discard=vis(HN.DiscardPile), stack=vis(HN.Stack), deck=vis(HN.Deck))
+    # The engine and the views implement exactly these regimes; anything else would be silently ignored.
+    if regime.hand is Visibility.HIDDEN_FROM_ALL:
+        raise ValueError("ontology: unsupported regime, hand identities cannot be HiddenFromAll")
+    if regime.discard is not Visibility.PUBLIC or regime.stack is not Visibility.PUBLIC:
+        raise ValueError("ontology: unsupported regime, the discard pile and the stacks must be Public")
+    if regime.deck is not Visibility.HIDDEN_FROM_ALL:
+        raise ValueError("ontology: unsupported regime, the deck must be HiddenFromAll")
+    return regime
+
+
 _CATEGORIES = {HN.Mechanic: "mechanic", HN.Dynamic: "dynamic", HN.Kinetic: "kinetic"}
 
 
@@ -259,6 +303,7 @@ def load_ontology() -> Ontology:
         affordances=_load_affordances(g),
         concepts=_load_concepts(g),
         rule_docs=_load_rule_docs(g),
+        regime=_load_regime(g),
     )
 
 

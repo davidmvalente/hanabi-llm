@@ -26,26 +26,21 @@ hn: a <http://www.w3.org/2002/07/owl#Ontology> ;
 # 1. Classes
 # ---------------------------------------------------------------------------
 
-hn:GameObject   a rdfs:Class ; rdfs:comment "Anything that exists in a game." .
-hn:Player       a rdfs:Class ; rdfs:subClassOf hn:GameObject .
-hn:Card         a rdfs:Class ; rdfs:subClassOf hn:GameObject .
-hn:Color        a rdfs:Class ; rdfs:subClassOf hn:GameObject .
-hn:Rank         a rdfs:Class ; rdfs:subClassOf hn:GameObject .
-hn:Stack        a rdfs:Class ; rdfs:subClassOf hn:GameObject .
-hn:Zone         a rdfs:Class ; rdfs:subClassOf hn:GameObject ;
+hn:Player       a rdfs:Class .
+hn:Card         a rdfs:Class .
+hn:Color        a rdfs:Class .
+hn:Rank         a rdfs:Class .
+hn:Stack        a rdfs:Class ; rdfs:subClassOf hn:Zone .
+hn:Zone         a rdfs:Class ;
                 rdfs:comment "A place where cards can be: deck, discard pile, a hand." .
 hn:DiscardPile  a rdfs:Class ; rdfs:subClassOf hn:Zone .
 hn:Hand         a rdfs:Class ; rdfs:subClassOf hn:Zone .
+hn:Deck         a rdfs:Class ; rdfs:subClassOf hn:Zone .
 hn:Game         a rdfs:Class ; rdfs:comment "One game in progress; carries the turn state (turn number, deck size)." .
 hn:TokenState   a rdfs:Class ; rdfs:comment "A limited pool of tokens. Always: available + spent = capacity." .
 hn:HintState    a rdfs:Class ; rdfs:subClassOf hn:TokenState ; rdfs:comment "Hint tokens: spent to give hints, returned by discards and completed 5s." .
 hn:FuseState    a rdfs:Class ; rdfs:subClassOf hn:TokenState ; rdfs:comment "Fuse tokens: spent by misfires, never returned. The game ends when none is available." .
 hn:PlayerCountSetup a rdfs:Class ; rdfs:comment "Per-player-count setup constants." .
-
-hn:Action       a rdfs:Class ; rdfs:comment "A turn choice. Exactly one per turn." .
-hn:PlayCard     a rdfs:Class ; rdfs:subClassOf hn:Action .
-hn:DiscardCard  a rdfs:Class ; rdfs:subClassOf hn:Action .
-hn:GiveHint     a rdfs:Class ; rdfs:subClassOf hn:Action .
 
 hn:Event        a rdfs:Class ; rdfs:comment "An immutable fact that happened. The public log is a list of events." .
 hn:PlayEvent    a rdfs:Class ; rdfs:subClassOf hn:Event .
@@ -59,9 +54,11 @@ hn:Mechanic     a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Local 
 hn:Dynamic      a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Macro behaviour over time: phases, cycles, clocks, feedback." .
 hn:Kinetic      a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Causal potentials: the quantities that drive the dynamics (mass, inertia, torque...)." .
 
-hn:Affordance   a rdfs:Class ; rdfs:comment "A callable game capability offered to a player." .
+hn:Affordance   a rdfs:Class ; rdfs:subClassOf hn:Executable ; rdfs:comment "A callable game capability offered to a player." .
 hn:Parameter    a rdfs:Class ; rdfs:comment "A typed argument of an affordance (becomes a tool-call argument)." .
-hn:Rule         a rdfs:Class ; rdfs:comment "A named game rule, checked or applied by a registered function." .
+hn:Executable   a rdfs:Class ; rdfs:comment "Something the engine runs by registered function name: a rule or an affordance." .
+hn:GameSetup    a rdfs:Class ; rdfs:comment "The global constants of the game (hn:Setup)." .
+hn:Rule         a rdfs:Class ; rdfs:subClassOf hn:Executable ; rdfs:comment "A named game rule, checked or applied by a registered function." .
 
 # ---------------------------------------------------------------------------
 # 2. Object properties and datatype properties
@@ -82,10 +79,9 @@ hn:rankValue      a rdf:Property ; rdfs:domain hn:Rank ; rdfs:range xsd:integer 
 hn:copiesPerColor a rdf:Property ; rdfs:domain hn:Rank ; rdfs:range xsd:integer .
 hn:playerCount    a rdf:Property ; rdfs:domain hn:PlayerCountSetup ; rdfs:range xsd:integer .
 hn:handSize       a rdf:Property ; rdfs:domain hn:PlayerCountSetup ; rdfs:range xsd:integer .
-hn:maxHintTokens  a rdf:Property ; rdfs:range xsd:integer .
-hn:initialHintTokens a rdf:Property ; rdfs:range xsd:integer .
-hn:initialFuseTokens a rdf:Property ; rdfs:range xsd:integer .
-hn:maxFuseTokens  a rdf:Property ; rdfs:range xsd:integer .
+hn:maxHintTokens  a rdf:Property ; rdfs:domain hn:GameSetup ; rdfs:range xsd:integer .
+hn:initialHintTokens a rdf:Property ; rdfs:domain hn:GameSetup ; rdfs:range xsd:integer .
+hn:initialFuseTokens a rdf:Property ; rdfs:domain hn:GameSetup ; rdfs:range xsd:integer .
 hn:available      a rdf:Property ; rdfs:domain hn:TokenState ; rdfs:range xsd:integer ;
                   rdfs:comment "Tokens that can still be used." .
 hn:capacity       a rdf:Property ; rdfs:domain hn:TokenState ; rdfs:range xsd:integer ;
@@ -104,7 +100,8 @@ hn:succeeded      a rdf:Property ; rdfs:domain hn:PlayEvent ; rdfs:range xsd:boo
 hn:hintedColor    a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Color .
 hn:hintedRank     a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Rank .
 hn:touchedPositions a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range xsd:integer .
-hn:turnNumber     a rdf:Property ; rdfs:domain hn:Event ; rdfs:range xsd:integer .
+hn:turnNumber     a rdf:Property ; rdfs:range xsd:integer ;
+                  rdfs:comment "The turn an event happened in, or the current turn of the game." .
 
 # --- Public per-card knowledge (derived from hints; common knowledge) -------
 hn:knownColor     a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Color ;
@@ -115,6 +112,8 @@ hn:excludedColor  a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Color ;
                   rdfs:comment "Colour the holder knows this card is NOT (a colour hint that skipped it)." .
 hn:excludedRank   a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Rank ;
                   rdfs:comment "Rank the holder knows this card is NOT." .
+hn:viewer          a rdf:Property ; rdfs:domain hn:Game ; rdfs:range hn:Player ;
+                  rdfs:comment "Present only in a view graph: the player whose view this is. Absent from the ground-truth graph." .
 hn:canInvoke      a rdf:Property ; rdfs:domain hn:Player ; rdfs:range hn:Affordance ;
                   rdfs:comment "Pointer from a player to an affordance (callable tool) currently open to them." .
 hn:isActivePlayer a rdf:Property ; rdfs:domain hn:Player ; rdfs:range xsd:boolean .
@@ -135,7 +134,8 @@ hn:ruleName           a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:stri
 hn:rationale          a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string ;
                       rdfs:comment "Why the rule exists, in terms of how it shapes play." .
 hn:example            a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string .
-hn:affordanceAction   a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Action .
+hn:exercises          a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Affordance ;
+                      rdfs:comment "The affordance an event is the exercise of (a PlayEvent exercises play_card)." .
 hn:functionName       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:string ;
                       rdfs:comment "Name of the tool exposed to the model." .
 hn:description        a rdf:Property ; rdfs:range xsd:string .
@@ -147,7 +147,7 @@ hn:paramDescription   a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd
 hn:requires           a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Rule .
 hn:appliesRule        a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Rule .
 hn:checkFunction      a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string .
-hn:effectFunction     a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:string .
+hn:effectFunction     a rdf:Property ; rdfs:domain hn:Executable ; rdfs:range xsd:string .
 hn:ruleText           a rdf:Property ; rdfs:range xsd:string .
 
 # ---------------------------------------------------------------------------
@@ -167,17 +167,17 @@ hn:Rank4 a hn:Rank ; hn:rankValue 4 ; hn:copiesPerColor 2 .
 hn:Rank5 a hn:Rank ; hn:rankValue 5 ; hn:copiesPerColor 1 .
 
 # Total = 5 colours x (3+2+2+2+1) = 50 cards. Checked by the engine on load.
-hn:deckTotalCards a rdf:Property ; rdfs:range xsd:integer .
+hn:deckTotalCards a rdf:Property ; rdfs:domain hn:GameSetup ; rdfs:range xsd:integer .
 hn:Setup hn:deckTotalCards 50 .
 
 # ---------------------------------------------------------------------------
 # 4. Global constants
 # ---------------------------------------------------------------------------
 
-hn:Setup hn:maxHintTokens 8 ;
+hn:Setup a hn:GameSetup ;
+         hn:maxHintTokens 8 ;
          hn:initialHintTokens 8 ;
-         hn:initialFuseTokens 3 ;
-         hn:maxFuseTokens 3 .
+         hn:initialFuseTokens 3 .
 
 # Hand size depends on player count (standard rules).
 hn:Setup2 a hn:PlayerCountSetup ; hn:playerCount 2 ; hn:handSize 5 .
@@ -269,7 +269,6 @@ hn:RuleDeckRunsOut a hn:Rule ;
 
 hn:AffPlayCard a hn:Affordance ;
     hn:family "action" ; hn:endsTurn true ;
-    hn:affordanceAction hn:PlayCard ;
     hn:functionName "play_card" ;
     hn:description "ACTION (ends your turn). Play a card from your own hand. If it is the next card of its colour's firework it is placed; otherwise it is discarded and a fuse token is spent. You cannot see your own cards." ;
     hn:requires hn:RuleCardInHand ;
@@ -279,7 +278,6 @@ hn:AffPlayCard a hn:Affordance ;
 
 hn:AffDiscardCard a hn:Affordance ;
     hn:family "action" ; hn:endsTurn true ;
-    hn:affordanceAction hn:DiscardCard ;
     hn:functionName "discard_card" ;
     hn:description "ACTION (ends your turn). Discard one card from your own hand to the public discard pile. Gives back one hint token if any is spent." ;
     hn:requires hn:RuleCardInHand ;
@@ -289,7 +287,6 @@ hn:AffDiscardCard a hn:Affordance ;
 
 hn:AffGiveHint a hn:Affordance ;
     hn:family "action" ; hn:endsTurn true ;
-    hn:affordanceAction hn:GiveHint ;
     hn:functionName "give_hint" ;
     hn:description "ACTION (ends your turn). Spend one hint token to tell another player about every card in their hand of one colour OR one rank. Reveals the positions of all matching cards." ;
     hn:requires hn:RuleHintTokenAvailable, hn:RuleHintTargetIsOther, hn:RuleHintTouchesCards, hn:RuleHintExactlyOneAttribute ;
@@ -349,6 +346,40 @@ hn:AffExplainRules a hn:Affordance ;
 hn:ParamTopic a hn:Parameter ;
     hn:paramName "topic" ; hn:paramType "topic" ; hn:optional true ;
     hn:paramDescription "An action name (play_card, discard_card, give_hint) or a rule name. Omit for the overview." .
+
+# ---------------------------------------------------------------------------
+# 7. Epistemics: who may know what.
+#    This is THE declaration of the game's information regime. Code
+#    (views.py) interprets it; the SHACL shapes (shapes/) enforce it on every
+#    graph; the non-interference tests check it end to end. See
+#    docs/EPISTEMICS.md for the four layers (truth, regime, common
+#    knowledge, view).
+#
+#    identityVisibility says who may see the IDENTITY (colour and rank) of the
+#    cards in a kind of zone. A card's existence and position are always
+#    public; only its identity is governed here.
+# ---------------------------------------------------------------------------
+
+hn:Visibility a rdfs:Class ; rdfs:comment "Who may see the identity of the cards in a zone." .
+hn:Public           a hn:Visibility ; rdfs:comment "Every player." .
+hn:HiddenFromHolder a hn:Visibility ; rdfs:comment "Every player except the one holding the card." .
+hn:HiddenFromAll    a hn:Visibility ; rdfs:comment "Nobody; not even the order of the cards." .
+
+hn:identityVisibility a rdf:Property ; rdfs:domain rdfs:Class ; rdfs:range hn:Visibility ;
+                      rdfs:comment "Stated on a kind of zone (hn:Hand, hn:Deck, ...), not on one zone." .
+hn:visibility         a rdf:Property ; rdfs:range hn:Visibility ;
+                      rdfs:comment "Who may see statements made with this property." .
+
+hn:Hand        hn:identityVisibility hn:HiddenFromHolder .   # you see everyone's cards but your own
+hn:DiscardPile hn:identityVisibility hn:Public .             # the discard pile is open
+hn:Stack       hn:identityVisibility hn:Public .             # played cards are open
+hn:Deck        hn:identityVisibility hn:HiddenFromAll .      # nobody sees the deck, or its order
+
+# What hints have told a holder about a card is common knowledge: everyone saw the hint.
+hn:knownColor    hn:visibility hn:Public .
+hn:knownRank     hn:visibility hn:Public .
+hn:excludedColor hn:visibility hn:Public .
+hn:excludedRank  hn:visibility hn:Public .
 
 # ---------------------------------------------------------------------------
 # 8. Game knowledge: mechanics, dynamics, kinetics

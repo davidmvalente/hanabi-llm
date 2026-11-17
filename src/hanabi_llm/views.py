@@ -23,9 +23,10 @@ per-card hint knowledge) is visible.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from rdflib import RDF, RDFS, XSD, Graph, Literal, Namespace
+from rdflib import RDF, RDFS, XSD, Graph, Literal, Namespace, URIRef
 
 from .engine import Game
 from .model import (
@@ -40,7 +41,7 @@ from .model import (
     PlayEvent,
     Seat,
 )
-from .ontology import HN
+from .ontology import HN, Regime
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,20 +72,26 @@ class PlayerView:
     score: int
 
 
-def _redact(event: Event, viewer: Seat) -> Event:
-    """Hide the identity of a card from the player who just drew it.
+def _redact(event: Event, viewer: Seat, regime: Regime) -> Event:
+    """Hide the identity of a freshly drawn card where the regime says it is hidden.
 
-    ``DrawEvent.card`` is replaced by a placeholder with rank 0; renderers
-    show it as "a new card".
+    A drawn card goes into the actor's hand, so it is visible to ``viewer``
+    exactly when hand cards held by the actor are. ``DrawEvent.card`` is
+    replaced by a placeholder with rank 0; renderers show "a new card".
     """
-    if isinstance(event, DrawEvent) and event.actor == viewer:
+    if isinstance(event, DrawEvent) and not regime.hand_identity_visible(viewer, event.actor):
         return DrawEvent(event.turn, event.actor, Card(event.card.uid, Color.RED, 0))
     return event
 
 
 def build_view(game: Game, viewer: Seat) -> PlayerView:
-    """Project the authoritative state down to what ``viewer`` may know."""
+    """Project the authoritative state down to what ``viewer`` may know.
+
+    The policy (who may see which cards) is declared in the ontology's
+    epistemics section and read here as ``regime``; this function applies it.
+    """
     st = game.state
+    regime = game.ontology.regime
     hands: list[tuple[CardView, ...]] = []
     for seat, hand in enumerate(st.hands):
         hands.append(
@@ -92,7 +99,7 @@ def build_view(game: Game, viewer: Seat) -> PlayerView:
                 CardView(
                     uid=c.uid,
                     position=i,
-                    card=None if seat == viewer else c,
+                    card=c if regime.hand_identity_visible(viewer, seat) else None,
                     knowledge=st.knowledge[c.uid],
                 )
                 for i, c in enumerate(hand)
@@ -110,7 +117,7 @@ def build_view(game: Game, viewer: Seat) -> PlayerView:
         stacks=dict(st.stacks),
         discard=tuple(st.discard),
         hands=tuple(hands),
-        events=tuple(_redact(e, viewer) for e in st.events),
+        events=tuple(_redact(e, viewer, regime) for e in st.events),
         over_reason=st.over_reason,
         score=st.score,
     )
@@ -121,60 +128,106 @@ def build_view(game: Game, viewer: Seat) -> PlayerView:
 # ---------------------------------------------------------------------------
 
 
-def _hg(game_id: str) -> Namespace:
+def graph_namespace(game_id: str = "g") -> Namespace:
+    """Namespace of the instance nodes of one game (cards, players, zones, events)."""
     return Namespace(f"https://example.org/hanabi/game/{game_id}#")
 
 
-def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
-    """Knowledge graph for one seat: ontology + the seat's visible state.
+def lit(value: int | bool) -> Literal:
+    return Literal(value, datatype=XSD.boolean if isinstance(value, bool) else XSD.integer)
 
-    The ontology triples are merged in so SPARQL can join state with
-    affordances (and their ``hn:functionName`` callable pointers).
-    """
-    hg = _hg(game_id)
+
+@dataclass(frozen=True, slots=True)
+class Iris:
+    """Ontology individuals for colours and ranks."""
+
+    color: dict[Color, URIRef]
+    rank: dict[int, URIRef]
+
+
+def iris_for(game: Game) -> Iris:
+    return Iris(
+        color={c: HN[c.value.capitalize()] for c in game.rules.colors},
+        rank={r: HN[f"Rank{r}"] for r in game.rules.copies_by_rank},
+    )
+
+
+def new_graph(game: Game, hg: Namespace) -> Graph:
+    """An empty game graph with the ontology merged in (so queries can join the two)."""
     g = Graph()
     g.bind("hn", HN)
     g.bind("hg", hg)
     for triple in game.ontology.graph:
         g.add(triple)
+    return g
 
-    color_iri = {c: HN[c.value.capitalize()] for c in game.rules.colors}
-    rank_iri = {r: HN[f"Rank{r}"] for r in game.rules.copies_by_rank}
 
-    def lit(value: int | bool) -> Literal:
-        return Literal(value, datatype=XSD.boolean if isinstance(value, bool) else XSD.integer)
-
-    # Turn state (the game node) and the two token pools: available + spent = capacity.
+def add_public_state(
+    g: Graph, hg: Namespace, game: Game, iris: Iris, *, names: Sequence[str], current: Seat, turn: int,
+    deck_size: int, hints: int, fuses: int, stacks: dict[Color, int],
+) -> None:
+    """The part of the state that is identical in every graph: game node, token pools, stacks, players."""
     state_node = hg["state"]
     g.add((state_node, RDF.type, HN.Game))
-    g.add((state_node, HN.deckSize, lit(view.deck_size)))
-    g.add((state_node, HN.turnNumber, lit(view.turn)))
+    g.add((state_node, HN.deckSize, lit(deck_size)))
+    g.add((state_node, HN.turnNumber, lit(turn)))
+    # Token pools: available + spent = capacity.
     for node_name, cls, available, capacity in (
-        ("hintState", HN.HintState, view.hints, game.rules.max_hints),
-        ("fuseState", HN.FuseState, view.fuses, game.rules.initial_fuses),
+        ("hintState", HN.HintState, hints, game.rules.max_hints),
+        ("fuseState", HN.FuseState, fuses, game.rules.initial_fuses),
     ):
         pool = hg[node_name]
         g.add((pool, RDF.type, cls))
         g.add((pool, HN.available, lit(available)))
         g.add((pool, HN.capacity, lit(capacity)))
         g.add((pool, HN.spent, lit(capacity - available)))
-
-    # Stacks.
-    for color, height in view.stacks.items():
+    for color, height in stacks.items():
         stack = hg[f"stack_{color.value}"]
         g.add((stack, RDF.type, HN.Stack))
-        g.add((stack, HN.stackOf, color_iri[color]))
+        g.add((stack, HN.stackOf, iris.color[color]))
         g.add((stack, HN.stackHeight, lit(height)))
-
-    # Players.
-    for seat, name in enumerate(view.names):
+    for seat, name in enumerate(names):
         player = hg[f"player{seat}"]
         g.add((player, RDF.type, HN.Player))
         g.add((player, HN.seatIndex, lit(seat)))
         g.add((player, RDFS.label, Literal(name)))
-        g.add((player, HN.isActivePlayer, lit(seat == view.current)))
+        g.add((player, HN.isActivePlayer, lit(seat == current)))
 
-    # Discard pile: public, identities visible.
+
+def add_identity(g: Graph, node: URIRef, card: Card, iris: Iris) -> None:
+    """State a card's identity. Call this ONLY where the regime lets the viewer see it."""
+    g.add((node, HN.hasColor, iris.color[card.color]))
+    g.add((node, HN.hasRank, iris.rank[card.rank]))
+
+
+def add_knowledge(g: Graph, node: URIRef, k: CardKnowledge, iris: Iris) -> None:
+    """What hints have told the holder about a card (common knowledge)."""
+    if k.color is not None:
+        g.add((node, HN.knownColor, iris.color[k.color]))
+    if k.rank is not None:
+        g.add((node, HN.knownRank, iris.rank[k.rank]))
+    for c in k.not_colors:
+        g.add((node, HN.excludedColor, iris.color[c]))
+    for r in k.not_ranks:
+        g.add((node, HN.excludedRank, iris.rank[r]))
+
+
+def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
+    """RDF graph of one seat's view: the ontology plus what the seat may see.
+
+    Used for validation (``validate.py``) and analysis; it is not a model-facing
+    tool. It is a read model: a pure function of ``(game, view)``, rebuilt on
+    demand and never written back.
+    """
+    hg = graph_namespace(game_id)
+    iris = iris_for(game)
+    g = new_graph(game, hg)
+    add_public_state(g, hg, game, iris, names=view.names, current=view.current, turn=view.turn,
+                     deck_size=view.deck_size, hints=view.hints, fuses=view.fuses, stacks=view.stacks)
+    me = hg[f"player{view.viewer}"]
+    g.add((hg["state"], HN.viewer, me))
+
+    # Discard pile: identities are public (see the regime in the ontology).
     discard = hg["discard"]
     g.add((discard, RDF.type, HN.DiscardPile))
     for card in view.discard:
@@ -182,35 +235,23 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
         g.add((node, RDF.type, HN.Card))
         g.add((node, HN.inZone, discard))
         g.add((node, HN.discarded, lit(True)))
-        g.add((node, HN.hasColor, color_iri[card.color]))
-        g.add((node, HN.hasRank, rank_iri[card.rank]))
+        add_identity(g, node, card, iris)
 
-    # Hands. The one visibility rule lives here: identity only if card is set.
+    # Hands. ``cv.card`` is None exactly where the regime hides identity from this viewer.
     for seat, hand in enumerate(view.hands):
-        player = hg[f"player{seat}"]
         zone = hg[f"hand{seat}"]
         g.add((zone, RDF.type, HN.Hand))
         for cv in hand:
             node = hg[f"card{cv.uid}"]
             g.add((node, RDF.type, HN.Card))
-            g.add((node, HN.heldBy, player))
+            g.add((node, HN.heldBy, hg[f"player{seat}"]))
             g.add((node, HN.inZone, zone))
             g.add((node, HN.position, lit(cv.position)))
-            if cv.card is not None:  # <- hidden for the viewer's own hand
-                g.add((node, HN.hasColor, color_iri[cv.card.color]))
-                g.add((node, HN.hasRank, rank_iri[cv.card.rank]))
-            k = cv.knowledge
-            if k.color is not None:
-                g.add((node, HN.knownColor, color_iri[k.color]))
-            if k.rank is not None:
-                g.add((node, HN.knownRank, rank_iri[k.rank]))
-            for c in k.not_colors:
-                g.add((node, HN.excludedColor, color_iri[c]))
-            for r in k.not_ranks:
-                g.add((node, HN.excludedRank, rank_iri[r]))
+            if cv.card is not None:
+                add_identity(g, node, cv.card, iris)
+            add_knowledge(g, node, cv.knowledge, iris)
 
     # Callable pointers: affordances currently open to the viewer.
-    me = hg[f"player{view.viewer}"]
     if view.viewer == view.current and view.over_reason is None:
         for spec in game.ontology.affordances.values():
             if spec.ends_turn and spec.function_name == "give_hint" and view.hints <= 0:
@@ -220,16 +261,18 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
         if not spec.ends_turn:  # read tools are always open
             g.add((me, HN.canInvoke, spec.iri))
 
-    # Event log (already redacted).
+    # Event log (already redacted). Each action event points at the affordance it exercises.
+    exercised = {PlayEvent: "play_card", DiscardEvent: "discard_card", HintEvent: "give_hint"}
     for i, ev in enumerate(view.events):
         node = hg[f"event{i}"]
         g.add((node, HN.turnNumber, lit(ev.turn)))
+        if type(ev) in exercised:
+            g.add((node, HN.exercises, game.ontology.affordances[exercised[type(ev)]].iri))
         if isinstance(ev, PlayEvent):
             g.add((node, RDF.type, HN.PlayEvent))
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))
             g.add((node, HN.card, hg[f"card{ev.card.uid}"]))
-            g.add((hg[f"card{ev.card.uid}"], HN.hasColor, color_iri[ev.card.color]))  # revealed on play
-            g.add((hg[f"card{ev.card.uid}"], HN.hasRank, rank_iri[ev.card.rank]))
+            add_identity(g, hg[f"card{ev.card.uid}"], ev.card, iris)  # a played card is revealed to all
             g.add((node, HN.succeeded, lit(ev.success)))
         elif isinstance(ev, DiscardEvent):
             g.add((node, RDF.type, HN.DiscardEvent))
@@ -240,9 +283,9 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))
             g.add((node, HN.target, hg[f"player{ev.target}"]))
             if ev.color is not None:
-                g.add((node, HN.hintedColor, color_iri[ev.color]))
+                g.add((node, HN.hintedColor, iris.color[ev.color]))
             if ev.rank is not None:
-                g.add((node, HN.hintedRank, rank_iri[ev.rank]))
+                g.add((node, HN.hintedRank, iris.rank[ev.rank]))
             for pos in ev.touched:
                 g.add((node, HN.touchedPositions, lit(pos)))
         elif isinstance(ev, DrawEvent):

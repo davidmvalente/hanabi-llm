@@ -53,6 +53,8 @@ class GameState:
     turn: int = 1
     #: ``None`` until the deck runs out, then counts down remaining turns.
     final_turns_left: int | None = None
+    #: Cards placed on the fireworks, in play order. Kept so the ground truth accounts for every card.
+    played: list[Card] = field(default_factory=list)
     knowledge: dict[int, CardKnowledge] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     over_reason: str | None = None
@@ -186,6 +188,7 @@ def _apply_play_card(state: GameState, rules: RuleSet, actor: Seat, action: Acti
     success = is_playable(state, card)
     if success:
         state.stacks[card.color] += 1
+        state.played.append(card)
         if card.rank == rules.top_rank:
             FUNCTIONS["refund_hint"](state, rules)
     else:

@@ -87,14 +87,19 @@ def _discard(view: PlayerView, rules: RuleSet) -> str:
 def _hands(view: PlayerView, rules: RuleSet) -> str:
     lines: list[str] = []
     for seat, hand in enumerate(view.hands):
+        hidden = any(cv.card is None for cv in hand)  # decided by the regime, in build_view
         if seat == view.viewer:
-            lines.append(f"{view.names[seat]} (you). You cannot see your cards; this is what hints have told you:")
-            lines += [f"  position {cv.position}: {describe_knowledge(cv.knowledge)}" for cv in hand]
+            who = f"{view.names[seat]} (you)."
+            lines.append(f"{who} You cannot see your cards; this is what hints have told you:" if hidden
+                         else f"{who} You can see your cards. 'You know' is what hints have told you:")
         else:
             lines.append(f"{view.names[seat]}. You can see their cards; they cannot. 'They know' is what hints told them:")
-            for cv in hand:
-                assert cv.card is not None  # only the viewer's own cards are hidden
-                lines.append(f"  position {cv.position}: {cv.card}   (they know: {describe_knowledge(cv.knowledge)})")
+        for cv in hand:
+            know = describe_knowledge(cv.knowledge)
+            if cv.card is None:
+                lines.append(f"  position {cv.position}: {know}")
+            else:
+                lines.append(f"  position {cv.position}: {cv.card}   ({'you' if seat == view.viewer else 'they'} know: {know})")
     lines.append("New cards enter at the last position; cards after a removed one shift down by one.")
     return "\n".join(lines)
 
