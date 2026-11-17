@@ -49,4 +49,5 @@ def test_the_feed_is_reproducible_from_the_seed(tmp_path: Path) -> None:
     a, _, _ = play(tmp_path, "random,random", 9)
     (tmp_path / "again").mkdir()
     b, _, _ = play(tmp_path / "again", "random,random", 9)
-    assert a == b
+    strip = lambda recs: [{k: v for k, v in r.items() if k != "ts"} for r in recs]  # the time of writing differs
+    assert strip(a) == strip(b)

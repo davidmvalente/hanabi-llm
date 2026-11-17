@@ -87,14 +87,18 @@ async def run(args: argparse.Namespace) -> GameResult:
     def on_turn(t: TurnTrace) -> None:
         if args.audit:
             audit(game)  # a violation is a bug in this code, never a model's fault: fail loudly
-        for ev in t.events:
-            print(narrate_event(ev, names))
+        took = ""
+        if (calls := sum(1 for m in t.messages if m.get("role") == "assistant")):  # bots make no calls: nothing to time
+            took = f"   [{t.duration_s:.1f} s, {calls} call{'s' if calls != 1 else ''}]"
+        for i, ev in enumerate(t.events):
+            print(narrate_event(ev, names) + (took if i == 0 else ""))
         if feed:
             for ev in t.events:
                 feed.write(event_record(ev))
         if trace:
             trace.write({"turn": t.turn, "player": t.player, "action": action_record(t.action),
-                         "messages": t.messages, "tokens": [t.prompt_tokens, t.completion_tokens]})
+                         "started": t.started, "duration_s": round(t.duration_s, 3), "messages": t.messages,
+                         "tokens": [t.prompt_tokens, t.completion_tokens]})
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as http:
@@ -111,7 +115,7 @@ async def run(args: argparse.Namespace) -> GameResult:
             # The turn that failed is the one worth reading, so it goes in the trace like any other turn.
             fault = result.fault
             trace.write({"turn": fault.turn, "player": fault.player, "action": None, "fault": {"kind": fault.kind.value, "detail": fault.detail},
-                         "messages": list(fault.messages), "tokens": None})
+                         "started": fault.started, "duration_s": round(fault.duration_s, 3), "messages": list(fault.messages), "tokens": None})
         if feed:
             feed.write(result_record(result))
         return result

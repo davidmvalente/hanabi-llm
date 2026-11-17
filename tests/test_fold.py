@@ -153,4 +153,5 @@ def test_the_feed_is_plain_jsonl_that_survives_a_file(tmp_path: Any) -> None:
         writer.write(r)
     assert json.loads(path.read_text().splitlines()[0])["names"] == ["Ann", "Bob"]  # flushed before close
     writer.close()
-    assert read_feed(path) == records
+    assert [{k: v for k, v in r.items() if k != "ts"} for r in read_feed(path)] == records
+    assert all(r["ts"].endswith("Z") for r in read_feed(path))  # each line is stamped with its UTC write time

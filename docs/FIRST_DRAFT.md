@@ -117,3 +117,9 @@ matched strings, a rigged deal that correctly failed conservation).
   is the count at the milestone).
 * Cards are plain `(colour, rank)` values with no id; a hand is a row of **slots** and a vacated slot is
   refilled in place (`docs/AUDIT.md`: "Cards are values", "Slots"). The test count is now 212.
+* Timing, because real models are slow: every feed line carries `ts` (UTC, ms); each trace row has the
+  turn's `started` and `duration_s` and, per model call, a `{"call": ...}` entry (latency including
+  retries and backoff, attempts, `finish_reason`, the provider that served it, the model actually
+  used, request id, usage). Failed calls are timed too. `hanabi-trace` shows time per player,
+  retries, replies cut off by `max_tokens`, who served the calls and the five slowest calls. The
+  test count is now 216.

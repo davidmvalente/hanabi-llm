@@ -20,9 +20,11 @@ the CLI writes them to a separate trace file.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
+from .clock import now_iso
 from .model import Action, Card, Color, DiscardEvent, DrawEvent, EndEvent, Event, GiveHint, HintEvent, PlayEvent
 from .ontology import Regime
 
@@ -93,13 +95,20 @@ def result_record(result: GameResult) -> Record:
 
 
 class FeedWriter:
-    """Appends records to a JSONL file, flushing every line."""
+    """Appends records to a JSONL file, flushing every line.
 
-    def __init__(self, path: Path) -> None:
+    Every record gets a ``ts`` (UTC ISO 8601, millisecond precision) taken when it is written. The
+    events of one turn are written together when the turn is over, so the gap between the timestamps
+    of consecutive turns is how long the turn took.
+    """
+
+    def __init__(self, path: Path, clock: Callable[[], str] = now_iso) -> None:
         self._fh: TextIO = path.open("w", encoding="utf-8")
+        self._clock = clock
 
     def write(self, record: Record) -> None:
-        self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        stamped = record if "ts" in record else {"ts": self._clock(), **record}
+        self._fh.write(json.dumps(stamped, ensure_ascii=False) + "\n")
         self._fh.flush()
 
     def close(self) -> None:

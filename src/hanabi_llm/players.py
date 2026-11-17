@@ -113,12 +113,17 @@ class LLMPlayer:
                 completion: Completion = await self._client.complete(messages, tools)
             except LLMError as exc:
                 # The client already retried with backoff. Not the model's fault.
-                trace.append({"error": str(exc)})
+                failed_call: JSON = {"error": str(exc)}
+                if (info := exc.call_info()) is not None:
+                    failed_call["call"] = info  # how long it took and what was retried
+                trace.append(failed_call)
                 raise PlayerFault(FaultKind.PROVIDER_ERROR, str(exc), trace) from exc
             ptok += completion.prompt_tokens
             ctok += completion.completion_tokens
             messages.append(completion.to_message())
             trace.append(completion.to_message())
+            if completion.meta is not None:
+                trace.append({"call": completion.meta.to_dict()})  # timing and provenance of this call, beside its reply
 
             if not completion.tool_calls:
                 failed += 1

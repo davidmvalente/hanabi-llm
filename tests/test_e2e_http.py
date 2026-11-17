@@ -115,8 +115,13 @@ def test_three_llm_seats_play_a_whole_game_through_tool_calls(provider, tmp_path
     assert fold(feed).score == result.score and feed[-1]["status"] == "completed"
     rows = [json.loads(line) for line in (tmp_path / "t.jsonl").read_text().splitlines()]
     assert len(rows) == result.turns and all(r["tokens"] == [200, 20] for r in rows)     # two calls x (100, 10)
-    called = [m["tool_calls"][0]["function"]["name"] for m in rows[0]["messages"] if m["role"] == "assistant"]
+    called = [m["tool_calls"][0]["function"]["name"] for m in rows[0]["messages"] if m.get("role") == "assistant"]
     assert called == ["get_state", "discard_card"]
+    # timing: every line of the feed is stamped, every turn and model call is timed in the trace
+    assert all(r["ts"].endswith("Z") for r in feed)
+    assert all(r["started"].endswith("Z") and r["duration_s"] >= 0 for r in rows)
+    calls = [m["call"] for m in rows[0]["messages"] if "call" in m]
+    assert len(calls) == 2 and all(c["attempts"] == 1 and c["latency_s"] >= 0 and c["started"].endswith("Z") for c in calls)
 
 
 def test_a_provider_outage_aborts_the_game_without_blaming_the_model(provider, tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -151,7 +156,7 @@ def test_a_model_that_never_calls_a_tool_is_at_fault(provider, tmp_path, monkeyp
     rows = [json.loads(line) for line in (tmp_path / "t.jsonl").read_text().splitlines()]
     assert [r["player"] for r in rows] == ["Alice", "Bob"] and rows[0].get("fault") is None
     assert rows[1]["fault"]["kind"] == "invalid_actions" and rows[1]["action"] is None
-    assert sum(1 for m in rows[1]["messages"] if m["role"] == "assistant") == 5
+    assert sum(1 for m in rows[1]["messages"] if m.get("role") == "assistant") == 5
 
     from hanabi_llm.trace_report import format_report
 

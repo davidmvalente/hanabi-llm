@@ -12,9 +12,11 @@ can disqualify that seat or simply re-run the game.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from .clock import now_iso
 from .engine import Game
 from .faults import FaultKind, GameStatus, JSON, PlayerFault
 from .model import Action, Event, Seat
@@ -31,6 +33,8 @@ class Fault:
     detail: str
     turn: int
     messages: tuple[JSON, ...] = ()
+    started: str = ""        # UTC ISO time the turn began
+    duration_s: float = 0.0  # how long the player was given to answer (the whole turn, all its calls)
 
 
 @dataclass(slots=True)
@@ -43,6 +47,8 @@ class TurnTrace:
     messages: list[JSON]
     prompt_tokens: int
     completion_tokens: int
+    started: str = ""
+    duration_s: float = 0.0
 
 
 @dataclass(slots=True)
@@ -109,21 +115,24 @@ async def play_game(
             toolbox=ToolBox(game, seat, view),
             legal=tuple(game.legal_actions(seat)),
         )
+        started, t0 = now_iso(), time.perf_counter()
         try:
             async with asyncio.timeout(turn_timeout):
                 result = await players[seat].take_turn(ctx)
         except TimeoutError:
-            fault = Fault(seat, players[seat].name, FaultKind.TIMEOUT, f"no answer within {turn_timeout:.0f}s", game.state.turn)
+            fault = Fault(seat, players[seat].name, FaultKind.TIMEOUT, f"no answer within {turn_timeout:.0f}s", game.state.turn,
+                          started=started, duration_s=time.perf_counter() - t0)
             return finish(GameStatus.ABORTED_INFRA_FAULT, fault, "aborted: turn timeout")
         except PlayerFault as pf:
-            fault = Fault(seat, players[seat].name, pf.kind, pf.detail, game.state.turn, tuple(pf.trace))
+            fault = Fault(seat, players[seat].name, pf.kind, pf.detail, game.state.turn, tuple(pf.trace),
+                          started=started, duration_s=time.perf_counter() - t0)
             status = GameStatus.ABORTED_MODEL_FAULT if pf.kind.attributable else GameStatus.ABORTED_INFRA_FAULT
             return finish(status, fault, f"aborted: {pf.kind.value}")
 
         turn_no = game.state.turn
         events = game.apply(seat, result.action)  # re-validates; raises IllegalAction on a bug
         trace = TurnTrace(turn_no, seat, players[seat].name, result.action, events, result.trace,
-                          result.prompt_tokens, result.completion_tokens)
+                          result.prompt_tokens, result.completion_tokens, started, time.perf_counter() - t0)
         traces.append(trace)
         if on_turn is not None:
             maybe = on_turn(trace)

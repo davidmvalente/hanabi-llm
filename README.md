@@ -1,13 +1,11 @@
 # hanabi-llm
 
-A simulation of Hanabi, a cooperative limited information exchange game
-
 Hanabi played by tool-calling language models (via OpenRouter), refereed by an
 engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 212 tests, no network needed
+uv run pytest                       # 216 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
