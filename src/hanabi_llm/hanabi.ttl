@@ -1,0 +1,429 @@
+# ---------------------------------------------------------------------------
+# Hanabi world model (Turtle).
+#
+# This file is the single source of truth for:
+#   * the ontology (what things are),
+#   * the game constants and card distribution (what the world contains),
+#   * the affordances (which actions exist, their parameters, their
+#     preconditions and their effects).
+#
+# Each affordance names the Python functions that implement its check and
+# its effect (hn:checkFunction / hn:effectFunction). At startup the engine
+# verifies that every named function is registered, so the ontology and the
+# code cannot silently drift apart.
+# ---------------------------------------------------------------------------
+
+@prefix hn:   <https://example.org/hanabi#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+hn: a <http://www.w3.org/2002/07/owl#Ontology> ;
+    rdfs:label "Hanabi world model" ;
+    rdfs:comment "Ontology, rules and affordances for the cooperative card game Hanabi." .
+
+# ---------------------------------------------------------------------------
+# 1. Classes
+# ---------------------------------------------------------------------------
+
+hn:GameObject   a rdfs:Class ; rdfs:comment "Anything that exists in a game." .
+hn:Player       a rdfs:Class ; rdfs:subClassOf hn:GameObject .
+hn:Card         a rdfs:Class ; rdfs:subClassOf hn:GameObject .
+hn:Color        a rdfs:Class ; rdfs:subClassOf hn:GameObject .
+hn:Rank         a rdfs:Class ; rdfs:subClassOf hn:GameObject .
+hn:Stack        a rdfs:Class ; rdfs:subClassOf hn:GameObject .
+hn:Zone         a rdfs:Class ; rdfs:subClassOf hn:GameObject ;
+                rdfs:comment "A place where cards can be: deck, discard pile, a hand." .
+hn:Deck         a rdfs:Class ; rdfs:subClassOf hn:Zone .
+hn:DiscardPile  a rdfs:Class ; rdfs:subClassOf hn:Zone .
+hn:Hand         a rdfs:Class ; rdfs:subClassOf hn:Zone .
+hn:Token        a rdfs:Class ; rdfs:subClassOf hn:GameObject .
+hn:HintToken    a rdfs:Class ; rdfs:subClassOf hn:Token .
+hn:FuseToken    a rdfs:Class ; rdfs:subClassOf hn:Token .
+hn:PlayerCountSetup a rdfs:Class ; rdfs:comment "Per-player-count setup constants." .
+
+hn:Action       a rdfs:Class ; rdfs:comment "A turn choice. Exactly one per turn." .
+hn:PlayCard     a rdfs:Class ; rdfs:subClassOf hn:Action .
+hn:DiscardCard  a rdfs:Class ; rdfs:subClassOf hn:Action .
+hn:GiveHint     a rdfs:Class ; rdfs:subClassOf hn:Action .
+
+hn:Event        a rdfs:Class ; rdfs:comment "An immutable fact that happened. The public log is a list of events." .
+hn:PlayEvent    a rdfs:Class ; rdfs:subClassOf hn:Event .
+hn:DiscardEvent a rdfs:Class ; rdfs:subClassOf hn:Event .
+hn:HintEvent    a rdfs:Class ; rdfs:subClassOf hn:Event .
+hn:DrawEvent    a rdfs:Class ; rdfs:subClassOf hn:Event .
+hn:EndEvent     a rdfs:Class ; rdfs:subClassOf hn:Event .
+
+hn:Concept      a rdfs:Class ; rdfs:comment "A piece of game knowledge a player may consult: mechanics, dynamics or kinetics." .
+hn:Mechanic     a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Local rules of a turn: what an action does to the state." .
+hn:Dynamic      a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Macro behaviour over time: phases, cycles, clocks, feedback." .
+hn:Kinetic      a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Causal potentials: the quantities that drive the dynamics (mass, inertia, torque...)." .
+
+hn:Affordance   a rdfs:Class ; rdfs:comment "A callable game capability offered to a player." .
+hn:Parameter    a rdfs:Class ; rdfs:comment "A typed argument of an affordance (becomes a tool-call argument)." .
+hn:Rule         a rdfs:Class ; rdfs:comment "A named game rule, checked or applied by a registered function." .
+
+# ---------------------------------------------------------------------------
+# 2. Object properties and datatype properties
+# ---------------------------------------------------------------------------
+
+hn:heldBy         a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Player ;
+                  rdfs:comment "The player whose hand currently holds the card." .
+hn:inZone         a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Zone .
+hn:hasColor       a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Color .
+hn:hasRank        a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Rank .
+hn:stackOf        a rdf:Property ; rdfs:domain hn:Stack ; rdfs:range hn:Color .
+hn:stackHeight    a rdf:Property ; rdfs:domain hn:Stack ; rdfs:range xsd:integer .
+hn:seatIndex      a rdf:Property ; rdfs:domain hn:Player ; rdfs:range xsd:integer .
+hn:position       a rdf:Property ; rdfs:domain hn:Card ; rdfs:range xsd:integer ;
+                  rdfs:comment "Slot index within the holder's hand. Public." .
+hn:colorName      a rdf:Property ; rdfs:domain hn:Color ; rdfs:range xsd:string .
+hn:rankValue      a rdf:Property ; rdfs:domain hn:Rank ; rdfs:range xsd:integer .
+hn:copiesPerColor a rdf:Property ; rdfs:domain hn:Rank ; rdfs:range xsd:integer .
+hn:playerCount    a rdf:Property ; rdfs:domain hn:PlayerCountSetup ; rdfs:range xsd:integer .
+hn:handSize       a rdf:Property ; rdfs:domain hn:PlayerCountSetup ; rdfs:range xsd:integer .
+hn:maxHintTokens  a rdf:Property ; rdfs:range xsd:integer .
+hn:initialHintTokens a rdf:Property ; rdfs:range xsd:integer .
+hn:initialFuseTokens a rdf:Property ; rdfs:range xsd:integer .
+hn:maxFuseTokens  a rdf:Property ; rdfs:range xsd:integer .
+hn:hintTokensLeft a rdf:Property ; rdfs:range xsd:integer .
+hn:fuseTokensLeft a rdf:Property ; rdfs:range xsd:integer .
+hn:deckSize       a rdf:Property ; rdfs:range xsd:integer .
+
+hn:actor          a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Player .
+hn:target         a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Player ;
+                  rdfs:comment "Receiver of a hint." .
+hn:card           a rdf:Property ; rdfs:domain hn:Event ; rdfs:range hn:Card .
+hn:succeeded      a rdf:Property ; rdfs:domain hn:PlayEvent ; rdfs:range xsd:boolean .
+hn:hintedColor    a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Color .
+hn:hintedRank     a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range hn:Rank .
+hn:touchedPositions a rdf:Property ; rdfs:domain hn:HintEvent ; rdfs:range xsd:integer .
+hn:turnNumber     a rdf:Property ; rdfs:domain hn:Event ; rdfs:range xsd:integer .
+
+# --- Public per-card knowledge (derived from hints; common knowledge) -------
+hn:knownColor     a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Color ;
+                  rdfs:comment "Colour the holder has been told this card has." .
+hn:knownRank      a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Rank ;
+                  rdfs:comment "Rank the holder has been told this card has." .
+hn:excludedColor  a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Color ;
+                  rdfs:comment "Colour the holder knows this card is NOT (a colour hint that skipped it)." .
+hn:excludedRank   a rdf:Property ; rdfs:domain hn:Card ; rdfs:range hn:Rank ;
+                  rdfs:comment "Rank the holder knows this card is NOT." .
+hn:canInvoke      a rdf:Property ; rdfs:domain hn:Player ; rdfs:range hn:Affordance ;
+                  rdfs:comment "Pointer from a player to an affordance (callable tool) currently open to them." .
+hn:isActivePlayer a rdf:Property ; rdfs:domain hn:Player ; rdfs:range xsd:boolean .
+hn:discarded      a rdf:Property ; rdfs:domain hn:Card ; rdfs:range xsd:boolean .
+hn:optional       a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:boolean .
+hn:summary        a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string .
+hn:guidance       a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string ;
+                  rdfs:comment "Actionable advice that follows from the concept." .
+hn:measuredBy     a rdf:Property ; rdfs:domain hn:Concept ;
+                  rdfs:comment "Graph property or tool from which the quantity can be read or computed." .
+hn:conceptName    a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string .
+hn:endsTurn       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:boolean ;
+                  rdfs:comment "True for the three actions; false for read-only or note-taking tools." .
+hn:affordanceAction   a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Action .
+hn:functionName       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:string ;
+                      rdfs:comment "Name of the tool exposed to the model." .
+hn:description        a rdf:Property ; rdfs:range xsd:string .
+hn:hasParameter       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Parameter .
+hn:paramName          a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:string .
+hn:paramType          a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:string ;
+                      rdfs:comment "One of: integer, color, rank, player." .
+hn:paramDescription   a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:string .
+hn:requires           a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Rule .
+hn:appliesRule        a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range hn:Rule .
+hn:checkFunction      a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string .
+hn:effectFunction     a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:string .
+hn:ruleText           a rdf:Property ; rdfs:range xsd:string .
+
+# ---------------------------------------------------------------------------
+# 3. Colours and ranks (what a card can be)
+# ---------------------------------------------------------------------------
+
+hn:Red    a hn:Color ; hn:colorName "red" .
+hn:Yellow a hn:Color ; hn:colorName "yellow" .
+hn:Green  a hn:Color ; hn:colorName "green" .
+hn:Blue   a hn:Color ; hn:colorName "blue" .
+hn:White  a hn:Color ; hn:colorName "white" .
+
+hn:Rank1 a hn:Rank ; hn:rankValue 1 ; hn:copiesPerColor 3 .
+hn:Rank2 a hn:Rank ; hn:rankValue 2 ; hn:copiesPerColor 2 .
+hn:Rank3 a hn:Rank ; hn:rankValue 3 ; hn:copiesPerColor 2 .
+hn:Rank4 a hn:Rank ; hn:rankValue 4 ; hn:copiesPerColor 2 .
+hn:Rank5 a hn:Rank ; hn:rankValue 5 ; hn:copiesPerColor 1 .
+
+# Total = 5 colours x (3+2+2+2+1) = 50 cards. Checked by the engine on load.
+hn:deckTotalCards a rdf:Property ; rdfs:range xsd:integer .
+hn:Setup hn:deckTotalCards 50 .
+
+# ---------------------------------------------------------------------------
+# 4. Global constants
+# ---------------------------------------------------------------------------
+
+hn:Setup hn:maxHintTokens 8 ;
+         hn:initialHintTokens 8 ;
+         hn:initialFuseTokens 3 ;
+         hn:maxFuseTokens 3 .
+
+# Hand size depends on player count (standard rules).
+hn:Setup2 a hn:PlayerCountSetup ; hn:playerCount 2 ; hn:handSize 5 .
+hn:Setup3 a hn:PlayerCountSetup ; hn:playerCount 3 ; hn:handSize 5 .
+hn:Setup4 a hn:PlayerCountSetup ; hn:playerCount 4 ; hn:handSize 4 .
+hn:Setup5 a hn:PlayerCountSetup ; hn:playerCount 5 ; hn:handSize 4 .
+
+# ---------------------------------------------------------------------------
+# 5. Rules (each one is enforced by a registered Python function)
+# ---------------------------------------------------------------------------
+
+hn:RuleHintTokenAvailable a hn:Rule ;
+    hn:ruleText "A hint can only be given if at least one hint token is available." ;
+    hn:checkFunction "hint_token_available" .
+
+hn:RuleHintTargetIsOther a hn:Rule ;
+    hn:ruleText "A hint must be given to another player, never to oneself." ;
+    hn:checkFunction "hint_target_is_other" .
+
+hn:RuleHintTouchesCards a hn:Rule ;
+    hn:ruleText "A hint must match at least one card in the target's hand; it must reveal something." ;
+    hn:checkFunction "hint_touches_cards" .
+
+hn:RuleHintExactlyOneAttribute a hn:Rule ;
+    hn:ruleText "A hint names exactly one attribute: a colour or a rank, never both." ;
+    hn:checkFunction "hint_one_attribute" .
+
+hn:RuleCardInHand a hn:Rule ;
+    hn:ruleText "A played or discarded card must be in the acting player's hand at the given position." ;
+    hn:checkFunction "card_in_hand" .
+
+hn:RuleHintRefund a hn:Rule ;
+    hn:ruleText "Discarding returns one hint token (up to the maximum). Completing a stack with a 5 also returns one hint token." ;
+    hn:effectFunction "refund_hint" .
+
+hn:RuleMisfireCostsFuse a hn:Rule ;
+    hn:ruleText "Playing a card that is not the next in its colour's stack discards it and costs one fuse token." ;
+    hn:checkFunction "play_is_legal_or_misfire" .
+
+hn:RuleGameEnds a hn:Rule ;
+    hn:ruleText "The game ends when fuses reach zero, all five stacks are complete, or after the final round when the deck is empty." ;
+    hn:checkFunction "game_is_over" .
+
+hn:RuleDeckRunsOut a hn:Rule ;
+    hn:ruleText "When the deck is empty, each player gets one final turn, then the game ends." ;
+    hn:checkFunction "final_round_done" .
+
+# ---------------------------------------------------------------------------
+# 6. Affordances (what a player may do on their turn)
+# ---------------------------------------------------------------------------
+
+hn:AffPlayCard a hn:Affordance ;
+    hn:endsTurn true ;
+    hn:affordanceAction hn:PlayCard ;
+    hn:functionName "play_card" ;
+    hn:description "Play a card from your own hand. If it is the next card of its colour's stack it is placed; otherwise it is discarded and a fuse token is lost. You cannot see your own cards." ;
+    hn:requires hn:RuleCardInHand ;
+    hn:appliesRule hn:RuleMisfireCostsFuse, hn:RuleHintRefund ;
+    hn:effectFunction "apply_play_card" ;
+    hn:hasParameter hn:ParamPlayPosition .
+
+hn:AffDiscardCard a hn:Affordance ;
+    hn:endsTurn true ;
+    hn:affordanceAction hn:DiscardCard ;
+    hn:functionName "discard_card" ;
+    hn:description "Discard one card from your own hand to the discard pile, which is public. Returns one hint token, up to the maximum." ;
+    hn:requires hn:RuleCardInHand ;
+    hn:appliesRule hn:RuleHintRefund ;
+    hn:effectFunction "apply_discard_card" ;
+    hn:hasParameter hn:ParamDiscardPosition .
+
+hn:AffGiveHint a hn:Affordance ;
+    hn:endsTurn true ;
+    hn:affordanceAction hn:GiveHint ;
+    hn:functionName "give_hint" ;
+    hn:description "Spend one hint token to tell another player about every card in their hand of one colour OR one rank. Hints reveal the positions of all matching cards." ;
+    hn:requires hn:RuleHintTokenAvailable, hn:RuleHintTargetIsOther, hn:RuleHintTouchesCards, hn:RuleHintExactlyOneAttribute ;
+    hn:effectFunction "apply_give_hint" ;
+    hn:hasParameter hn:ParamHintTarget, hn:ParamHintColor, hn:ParamHintRank .
+
+# Parameters. Each becomes a JSON-schema property in the tool definition.
+hn:ParamPlayPosition a hn:Parameter ;
+    hn:paramName "position" ; hn:paramType "integer" ;
+    hn:paramDescription "Slot index (0-based) of the card in your hand to play." .
+
+hn:ParamDiscardPosition a hn:Parameter ;
+    hn:paramName "position" ; hn:paramType "integer" ;
+    hn:paramDescription "Slot index (0-based) of the card in your hand to discard." .
+
+hn:ParamHintTarget a hn:Parameter ;
+    hn:paramName "target" ; hn:paramType "player" ;
+    hn:paramDescription "Seat name of the player receiving the hint. Must not be you." .
+
+hn:ParamHintColor a hn:Parameter ;
+    hn:paramName "color" ; hn:paramType "color" ; hn:optional true ;
+    hn:paramDescription "Colour to reveal (red, yellow, green, blue, white). Omit when giving a rank hint." .
+
+hn:ParamHintRank a hn:Parameter ;
+    hn:paramName "rank" ; hn:paramType "rank" ; hn:optional true ;
+    hn:paramDescription "Rank to reveal (1-5). Omit when giving a colour hint." .
+
+# Read-only affordance: the model may query its own knowledge graph at any time.
+hn:AffQueryKnowledge a hn:Affordance ;
+    hn:endsTurn false ;
+    hn:functionName "query_knowledge" ;
+    hn:description "Run a read-only SPARQL SELECT over the knowledge graph you are allowed to see. Use it to check what you know about cards, hints, stacks and tokens." ;
+    hn:effectFunction "run_sparql_select" ;
+    hn:hasParameter hn:ParamQuery .
+
+hn:ParamQuery a hn:Parameter ;
+    hn:paramName "sparql" ; hn:paramType "string" ;
+    hn:paramDescription "A SPARQL SELECT query using the prefix hn: <https://example.org/hanabi#>." .
+
+# Private scratchpad: lets a model carry its reasoning to its own next turn.
+# Notes are visible only to their author; they are not part of the game state.
+hn:AffTakeNotes a hn:Affordance ;
+    hn:endsTurn false ;
+    hn:functionName "take_notes" ;
+    hn:description "Save private notes for your own future turns (for example your inferences about your hand). Replaces your previous notes. Nobody else can read them, and they do not count as an action." ;
+    hn:effectFunction "store_notes" ;
+    hn:hasParameter hn:ParamNotes .
+
+hn:ParamNotes a hn:Parameter ;
+    hn:paramName "notes" ; hn:paramType "string" ;
+    hn:paramDescription "Free text, kept short." .
+
+# ---------------------------------------------------------------------------
+# 7. Read-only affordances: they never end the turn and may be called any
+#    number of times (within the per-turn call budget).
+# ---------------------------------------------------------------------------
+
+hn:AffGetRules a hn:Affordance ;
+    hn:endsTurn false ;
+    hn:functionName "get_rules" ;
+    hn:description "Return the rules of the game: setup constants, card distribution, and every rule." ;
+    hn:effectFunction "describe_rules" .
+
+hn:AffGetState a hn:Affordance ;
+    hn:endsTurn false ;
+    hn:functionName "get_state" ;
+    hn:description "Return the current game state as you are allowed to see it: stacks, tokens, discard pile, other players' hands, what hints have told you about your own cards, and recent events." ;
+    hn:effectFunction "describe_state" .
+
+hn:AffGetConcepts a hn:Affordance ;
+    hn:endsTurn false ;
+    hn:functionName "get_concepts" ;
+    hn:description "Consult game-theory notes. With no arguments, list all concepts. Give `category` (mechanic, dynamic or kinetic) to filter, or `name` to read one concept in full, with strategic guidance." ;
+    hn:effectFunction "describe_concepts" ;
+    hn:hasParameter hn:ParamConceptCategory, hn:ParamConceptName .
+
+hn:ParamConceptCategory a hn:Parameter ;
+    hn:paramName "category" ; hn:paramType "string" ; hn:optional true ;
+    hn:paramDescription "One of: mechanic, dynamic, kinetic." .
+
+hn:ParamConceptName a hn:Parameter ;
+    hn:paramName "name" ; hn:paramType "string" ; hn:optional true ;
+    hn:paramDescription "Concept name as listed by get_concepts, for the full text." .
+
+hn:AffEstimateCard a hn:Affordance ;
+    hn:endsTurn false ;
+    hn:functionName "estimate_card" ;
+    hn:description "Estimate what one of YOUR OWN cards could be, by counting the copies you cannot see (not in other hands, the discard pile or the stacks) and applying what hints told you. Returns the candidate identities with probabilities, plus the chance the card is playable now. Approximate: treats your cards independently." ;
+    hn:effectFunction "estimate_card_probabilities" ;
+    hn:hasParameter hn:ParamEstimatePosition .
+
+hn:ParamEstimatePosition a hn:Parameter ;
+    hn:paramName "position" ; hn:paramType "integer" ;
+    hn:paramDescription "Slot index (0-based) of the card in your own hand." .
+
+# ---------------------------------------------------------------------------
+# 8. Game knowledge: mechanics, dynamics, kinetics
+#    Part of the initial graph, so models can also reach it through SPARQL:
+#      SELECT ?n ?g WHERE { ?c a hn:Kinetic ; hn:conceptName ?n ; hn:guidance ?g }
+# ---------------------------------------------------------------------------
+
+# --- Mechanics: what one action does -----------------------------------------
+
+hn:OneActionPerTurn a hn:Mechanic ; hn:conceptName "one_action_per_turn" ;
+    hn:summary "Each turn is exactly one of: play a card, discard a card, give a hint. Reading tools are free." ;
+    hn:guidance "Information requests never cost a turn, so check the state, the discard pile and your odds before acting." .
+
+hn:HintGrammar a hn:Mechanic ; hn:conceptName "hint_grammar" ;
+    hn:summary "A hint names one colour or one rank and reveals EVERY matching card in a teammate's hand, including the positions that do not match (negative information)." ;
+    hn:guidance "Pick the hint whose touched set is most informative. A hint that touches one card of the right kind usually means 'play that one'. Cards NOT touched are also informed: they are not that colour or rank." .
+
+hn:HandShift a hn:Mechanic ; hn:conceptName "hand_shift" ;
+    hn:summary "Positions are 0-based. When a card leaves your hand, later cards slide down one slot and the new card enters in the LAST slot." ;
+    hn:guidance "Track positions after every play or discard, yours and your teammates'. A hint's meaning is tied to the positions at the time it was given." .
+
+hn:HintRefund a hn:Mechanic ; hn:conceptName "hint_refund" ;
+    hn:summary "Discarding returns one hint token (never above the maximum). Completing a stack with its 5 also returns one." ;
+    hn:measuredBy hn:hintTokensLeft ;
+    hn:guidance "Discarding when you are already at the maximum gains nothing: prefer a useful hint or a safe play then." .
+
+hn:FinalRound a hn:Mechanic ; hn:conceptName "final_round" ;
+    hn:summary "When the last card is drawn, every player (the drawer included) gets one more turn, then the game ends." ;
+    hn:measuredBy hn:deckSize ;
+    hn:guidance "In the final round discards no longer help anyone. Gamble on plays that are likely right; a misfire costs less than an unplayed card." .
+
+# --- Dynamics: behaviour over time -------------------------------------------
+
+hn:HintDiscardCycle a hn:Dynamic ; hn:conceptName "hint_discard_cycle" ;
+    hn:summary "Hints are spent to move information; discards (and completed 5s) recover them. The team trades card supply for information supply." ;
+    hn:measuredBy hn:hintTokensLeft ;
+    hn:guidance "With few tokens left, a discard is how you buy the next hint. With many, spend them on hints that unlock plays instead of discarding good cards." .
+
+hn:GamePhases a hn:Dynamic ; hn:conceptName "game_phases" ;
+    hn:summary "Early: tokens plentiful, fuses full, cheap information. Middle: tokens scarce, discards grow, risk of discarding something needed. End: the deck is empty and every turn counts." ;
+    hn:measuredBy hn:deckSize ;
+    hn:guidance "Be generous with hints early, careful with discards in the middle, and willing to gamble at the end." .
+
+hn:DeckClock a hn:Dynamic ; hn:conceptName "deck_clock" ;
+    hn:summary "The deck shrinks by one card per turn (while it lasts), so the game length is roughly fixed by the player count." ;
+    hn:measuredBy hn:deckSize ;
+    hn:guidance "Count the cards left in the deck and ask how many useful turns remain. Stalling spends clock." .
+
+hn:Irreversibility a hn:Dynamic ; hn:conceptName "irreversibility" ;
+    hn:summary "When every copy of a card is gone (played or discarded), the fireworks that needed it can never be completed. Each 5 has a single copy." ;
+    hn:guidance "Before discarding, check the discard pile for copies of that card. Never discard a card that might be a 5 or a last copy." .
+
+hn:InformationDecay a hn:Dynamic ; hn:conceptName "information_decay" ;
+    hn:summary "Hints go stale. A colour hint is worth little once that colour's stack is complete; a rank hint is worth little once every copy of that rank is played." ;
+    hn:guidance "Reread what each hinted card could still be. A card that every stack has already passed is safe to discard." .
+
+hn:FiveMomentum a hn:Dynamic ; hn:conceptName "five_momentum" ;
+    hn:summary "Completing a stack with a 5 refunds a hint token, which funds further hints, which enable further plays." ;
+    hn:guidance "Finishing a stack when tokens are low is worth extra: it refinances the team." .
+
+hn:Stalling a hn:Dynamic ; hn:conceptName "stalling" ;
+    hn:summary "A hint or a discard is a safe way to pass the turn, but it burns deck clock." ;
+    hn:guidance "Stall only while waiting costs less than a risky play. Near the end, stalling is usually wrong." .
+
+# --- Kinetics: causal potentials ---------------------------------------------
+
+hn:CardMass a hn:Kinetic ; hn:conceptName "card_mass" ;
+    hn:summary "How much a card matters: scarcity times progress. A last copy of a needed card is heavy; a spare 1 is light." ;
+    hn:measuredBy hn:copiesPerColor ;
+    hn:guidance "Protect heavy cards: hint them, never discard them. Discard light cards first." .
+
+hn:BeliefInertia a hn:Kinetic ; hn:conceptName "belief_inertia" ;
+    hn:summary "Once a card has been hinted, its holder's belief about it is hard to change. A teammate who was told a card is 'blue' will keep treating it as a blue card to play." ;
+    hn:measuredBy hn:knownColor ;
+    hn:guidance "Hint with the future in mind: your hint commits the receiver to a plan." .
+
+hn:HintTorque a hn:Kinetic ; hn:conceptName "hint_torque" ;
+    hn:summary "Leverage of a hint: how much it changes what the receiver will do. Touching a card that is playable right now has high leverage; touching a dead card has almost none." ;
+    hn:measuredBy hn:touchedPositions ;
+    hn:guidance "Prefer the hint with the greatest effect on the receiver's next action. If a hint can be read two ways, the receiver may pick the wrong one." .
+
+hn:ActivationEnergy a hn:Kinetic ; hn:conceptName "activation_energy" ;
+    hn:summary "The certainty you need before playing. The barrier is the fuse token you lose if you are wrong." ;
+    hn:measuredBy hn:fuseTokensLeft ;
+    hn:guidance "Use estimate_card. With 3 fuses play at moderate odds; with 1 fuse require near certainty." .
+
+hn:CollisionRate a hn:Kinetic ; hn:conceptName "collision_rate" ;
+    hn:summary "Randomness enters through the deck. The chance an unseen card is a given card is (copies remaining) / (unseen cards)." ;
+    hn:guidance "Count what you can see: other hands, discard pile and stacks. The rest is the pool your cards and the deck draw from. estimate_card does this for you." .
+
+hn:PotentialEnergy a hn:Kinetic ; hn:conceptName "potential_energy" ;
+    hn:summary "Hint tokens are stored potential: spending one converts it into information; discarding refills the store." ;
+    hn:measuredBy hn:hintTokensLeft ;
+    hn:guidance "Do not hoard tokens: unspent potential at the end of the game is wasted." .

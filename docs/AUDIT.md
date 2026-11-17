@@ -1,0 +1,101 @@
+# Design audit: fairness and robustness
+
+Review of the first draft's decisions. Each finding says what was wrong, what
+changed, and how it is tested. "Open" items need a decision or belong to the
+tournament layer.
+
+## Findings fixed in this revision
+
+| # | Finding | Severity | Fix | Test |
+|---|---|---|---|---|
+| 1 | **Card ids encoded identity.** Ids were assigned before the shuffle, so they ascended with colour and rank. `hg:card4` in a model's own hand narrowed down what it was; SPARQL exposes ids. | High (information leak) | Shuffle first, then number cards in shuffled order. | `test_card_ids_do_not_encode_identity` |
+| 2 | **Leak tests were too weak.** They checked colour/rank triples only, so #1 slipped through. | High (process) | Added a non-interference test: two games differing only in the viewer's hidden cards and the deck must give byte-identical input to the model across every read tool. Mutation-checked: breaking the redaction fails it. | `test_noninterference_hidden_cards_never_reach_the_model` |
+| 3 | **Forfeit = silent substitute move.** After failures the referee discarded position 0, possibly a 5. That changes the game the *teammates* play, makes scores incomparable, and can reward or punish a seat arbitrarily. | High (fairness) | Removed. A player returns a valid action or raises `PlayerFault`; the game is aborted and never ranked. | `test_faults_abort_the_game_and_never_change_it` |
+| 4 | **Blame was undifferentiated.** Provider outages, rate limits and slow networks were handled like model mistakes. | High (fairness) | `FaultKind` splits attributable model faults (`invalid_actions`, `no_action`) from non-attributable infra faults (`provider_error`, `timeout`). Infra faults void the game for everyone and say it should be re-run. | parametrized fault tests |
+| 5 | **Wall-clock timeout punished slow models.** Latency is not skill. | Medium | Timeout is only a generous safety net (300 s) and is classed as infra. Per-turn budgets are counted in model calls and rejected actions, not seconds. | `test_timeout_is_infra_not_blame` |
+| 6 | **Seat names were built from model ids** (`P0_claude-sonnet...`). A model could see which teammate is which model, and be biased by it. | Medium (bias) | Neutral names (Alice, Bob...). The seat to model map lives only in the log header. | `test_seat_names_are_neutral` |
+| 7 | **Sync SPARQL could stall everyone.** rdflib blocks the event loop; `asyncio.timeout` cannot interrupt it. | High (robustness) | Query runs in a daemon thread with a 5 s wait limit, length cap and row cap. | `test_slow_query_times_out_without_blocking` |
+| 8 | **Mistakes in free tools counted against the model.** | Medium | Only rejected *action* attempts count toward the budget. Read-tool errors are free (bounded by the call budget). | `test_read_tool_mistakes_never_disqualify` |
+| 9 | **Games were not reproducible.** Seed optional, not logged, no action log. | Medium | Seed always chosen and logged; `GameResult.action_log` + seed replays a game exactly. | `test_action_log_and_seed_replay_exactly` |
+| 10 | **Sampling limits uncontrolled.** Temperature and output length were implicit. | Low | `--temperature`, `--max-tokens`, budgets are identical for all seats and written to the log header. | n/a |
+| 11 | **Transcript could be lost on a crash.** | Low | Log is flushed after every record; a final `result` record carries status, blame and `counts_for_ranking`. | n/a |
+| 12 | **Opinionated strategy text in the system prompt.** Fine if identical for all, but it duplicates the new concept notes. | Low | Prompt now states only rules and turn structure; strategy lives in `get_concepts`. | n/a |
+
+## Fairness policy as implemented
+
+* Every seat gets the same system prompt (apart from its own name), the same
+  tools, the same call budget and the same sampling limits.
+* A game ends in exactly one of: `completed`, `aborted_model_fault`,
+  `aborted_infra_fault`. Only `completed` has an official score.
+* A model that makes 3 rejected action attempts in one turn, or never acts
+  within 8 model calls, is at fault. The default budgets are visible to the
+  model in its prompt.
+* When one model faults in a cooperative game, the teammates' game is void
+  too. Whether that is a loss for the faulting model only, and how many
+  voided games disqualify it from the championship, is a tournament-layer
+  rule (see Open items).
+* If a message contains several tool calls, they are processed in order and
+  the first accepted action ends the turn; later calls are ignored.
+
+## Known limitations
+
+* **Runaway SPARQL.** Python cannot kill a thread, so a pathological query
+  keeps using CPU until the process exits and can slow other seats through the
+  GIL. The robust fix is a subprocess sandbox for `query_knowledge`.
+* **Truncated replies.** A reply cut off by `max_tokens` currently looks like
+  "no tool call" and counts against the model. It should be detected through
+  `finish_reason == "length"` and retried or classed as configuration, not blame.
+* **Provider routing.** OpenRouter may serve the same model id from different
+  providers or quantizations. For ranking runs, pin the provider and disable
+  fallbacks, and record which provider answered.
+* **Tool-calling support differs by model.** A model with no tool support will
+  fault on every game. A capability pre-flight before a tournament is advisable.
+
+## Open items (need your decision)
+
+1. **Helper tools change what is measured.** `estimate_card` does the
+   card-counting arithmetic for the model. That helps weaker reasoners and
+   narrows gaps between models. Keep it for everyone, make it a switch
+   (`--no-helpers`), or drop it for the championship?
+2. **Fault consequences.** Options: (a) the faulting model scores 0 and the
+   teammates' game is re-run; (b) the game is simply void and re-run, with
+   repeated faults disqualifying the model; (c) a fixed penalty. The code
+   already provides what each needs (`Fault.seat`, `kind.attributable`).
+3. **Seat and pairing design.** Seat 0 moves first. A fair championship should
+   rotate seats and reuse the same deal seeds across every pairing, then
+   compare over many seeds. That belongs in a runner above `play_game`.
+
+## v1.1 plan: token parsimony and caching
+
+**Is the conversation cached?** Partly, and not as a "thread". Each API call is
+stateless. Providers can cache a repeated *prefix* of the prompt, which lowers
+price and latency but not the tokens counted against the context window. Per
+the [OpenRouter prompt-caching docs](https://openrouter.ai/docs/guides/best-practices/prompt-caching),
+some providers cache implicitly and automatically; Anthropic and Google use
+`cache_control` markers; and OpenRouter tries to keep follow-up requests on the
+same provider ("sticky routing", sped up by passing a `session_id`). Cache
+lifetimes are short for some providers (a 5-minute write TTL is documented for
+Anthropic), so a slow tournament can miss.
+
+**What that means for this design.** Today each turn is stateless: the system
+prompt is an identical prefix (cacheable), but the user message holds the whole
+state and changes every turn, so only the prefix benefits.
+
+**Plan:**
+1. Make each seat's conversation append-only. Turn 1 sends the full snapshot;
+   later turns append only a delta (events since that seat's last turn, newly
+   visible cards, changed hint knowledge, token counts) and keep earlier
+   assistant and tool messages verbatim, so the entire history is a cache hit.
+2. Keep `get_state` as the resync tool, and rebuild a fresh snapshot every N
+   turns (this costs one cold cache but bounds context growth).
+3. Pass a stable `session_id` per seat and per game for sticky routing, and mark
+   an explicit `cache_control` breakpoint for providers that need one.
+4. Never depend on the cache for correctness. The delta must be generated by one
+   deterministic code path, and a cache miss must only cost money.
+5. Measure first: log cached vs uncached prompt tokens per turn (the usage
+   block already reports prompt tokens) before optimising further.
+
+Trade-off: an append-only thread grows linearly per turn (quadratic total
+tokens if the cache misses), whereas the stateless design is linear in total
+but pays the full state each turn. The crossover is worth measuring on real
+models.
