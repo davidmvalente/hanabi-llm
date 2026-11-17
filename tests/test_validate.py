@@ -71,7 +71,7 @@ def g3() -> Game:
 
 
 def test_truth_rejects_a_card_with_two_colours(g3: Game) -> None:
-    corrupt("two colours", g3, lambda g: (g.add((HG["card0"], HN.hasColor, HN.Red)), g.add((HG["card0"], HN.hasColor, HN.Blue))),
+    corrupt("two colours", g3, lambda g: (g.add((HG["hand0_0"], HN.hasColor, HN.Red)), g.add((HG["hand0_0"], HN.hasColor, HN.Blue))),
             check_truth, "exactly one colour")
 
 
@@ -101,19 +101,17 @@ def test_truth_rejects_tokens_beyond_capacity() -> None:
 def test_truth_rejects_a_hint_that_lies() -> None:
     game = Game(["Alice", "Bob"], seed=1)
     card = game.state.hands[1][0]
-    game.rig(knowledge={card.uid: CardKnowledge(color=Color.BLUE if card.color is not Color.BLUE else Color.RED)})
+    game.rig(knowledge={(1, 0): CardKnowledge(color=Color.BLUE if card.color is not Color.BLUE else Color.RED)})
     with pytest.raises(AuditError, match="hint told the holder"):
         check_truth(truth_graph(game))
 
 
 def test_view_rejects_a_leaked_own_card(g3: Game) -> None:
-    own = g3.state.hands[0][0]
-    corrupt("leak", g3, lambda g: g.add((HG[f"card{own.uid}"], HN.hasColor, HN.Red)), check_view, "LEAK: the viewer can see")
+    corrupt("leak", g3, lambda g: g.add((HG["hand0_0"], HN.hasColor, HN.Red)), check_view, "LEAK: the viewer can see")
 
 
 def test_view_rejects_a_missing_teammate_identity(g3: Game) -> None:
-    other = g3.state.hands[1][0]
-    corrupt("hidden teammate", g3, lambda g: g.remove((HG[f"card{other.uid}"], HN.hasRank, None)), check_view, "cannot see the identity")
+    corrupt("hidden teammate", g3, lambda g: g.remove((HG["hand1_0"], HN.hasRank, None)), check_view, "cannot see the identity")
 
 
 def test_view_rejects_a_deck_card_and_a_deck_zone(g3: Game) -> None:

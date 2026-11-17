@@ -17,7 +17,7 @@ from hanabi_llm.viewer import frames
 from hanabi_llm.views import build_view, describe_event, narrate_event
 
 NAMES = ["Alice", "Bob", "Carol"]
-CARD = {"uid": 1, "color": "blue", "rank": 1}
+CARD = {"color": "blue", "rank": 1}
 
 
 def line(rec: dict, you: int | None = None) -> str:  # type: ignore[type-arg]
@@ -36,8 +36,8 @@ def line(rec: dict, you: int | None = None) -> str:  # type: ignore[type-arg]
      "T1 Alice hinted Bob: positions 0, 2 and 4 are red"),
     # the colour is in the TEXT of every card, so it survives copy and paste
     ({"turn": 8, "kind": "discard", "actor": 1, "position": 1, "card": CARD}, "T8 Bob discarded blue 1 from position 1"),
-    ({"turn": 8, "kind": "draw", "actor": 1, "card": {"uid": 2, "color": "red", "rank": 2}}, "T8 Bob drew red 2"),
-    ({"turn": 10, "kind": "play", "actor": 0, "position": 2, "card": {"uid": 3, "color": "blue", "rank": 2}, "success": False},
+    ({"turn": 8, "kind": "draw", "actor": 1, "card": {"color": "red", "rank": 2}}, "T8 Bob drew red 2"),
+    ({"turn": 10, "kind": "play", "actor": 0, "position": 2, "card": {"color": "blue", "rank": 2}, "success": False},
      "T10 Alice played blue 2 from position 2 -> misfire (fuse lost)"),
     ({"turn": 5, "kind": "play", "actor": 0, "position": 0, "card": CARD, "success": True}, "T5 Alice played blue 1 from position 0 -> placed"),
     ({"turn": 65, "kind": "end", "reason": "all fuse tokens were used up", "score": 4}, "T65 Game over: all fuse tokens were used up (score 4)"),
@@ -47,9 +47,9 @@ def test_the_wording(rec: dict, expected: str) -> None:  # type: ignore[type-arg
 
 
 def test_a_hidden_draw_is_a_card_not_a_colour() -> None:
-    hidden = {"turn": 8, "kind": "draw", "actor": 1, "card": {"uid": 2, "color": None, "rank": None}}
+    hidden = {"turn": 8, "kind": "draw", "actor": 1, "card": None}
     assert line(hidden) == "T8 Bob drew a card"
-    assert line({**hidden, "card": {"uid": 2, "color": "red", "rank": 0}}) == "T8 Bob drew a card"   # the redaction placeholder
+    assert line({**hidden, "card": {"uid": 2, "color": None, "rank": None}}) == "T8 Bob drew a card"   # an older feed's null identity still reads
 
 
 def test_no_line_carries_information_only_in_formatting() -> None:

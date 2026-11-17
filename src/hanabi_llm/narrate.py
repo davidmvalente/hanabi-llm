@@ -35,9 +35,9 @@ def _join(items: Sequence[int]) -> str:
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
-def card_hidden(card: Record) -> bool:
-    """A card whose identity was removed (or is the redacted placeholder, rank 0)."""
-    return card.get("color") is None or not card.get("rank")
+def card_hidden(card: Record | None) -> bool:
+    """A card whose identity is hidden from the viewer (``None``, or an older feed's null colour)."""
+    return card is None or card.get("color") is None
 
 
 def segments(rec: Record) -> list[Segment]:

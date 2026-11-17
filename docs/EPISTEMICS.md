@@ -61,7 +61,8 @@ violation aborts the run loudly, because it is a bug in this code, not a model's
 
 * **Made and shuffled** in `Game.__init__` (`engine.py`): the identities are generated from the
   ontology's distribution (every colour times its copies per rank), shuffled with
-  `random.Random(seed)`, and only then numbered, so a card's id carries no information. Hands
+  `random.Random(seed)`. There are no card ids: a card is a `(colour, rank)` value, and which copy is meant is
+  always said by where it is (a hand slot, a place in the discard pile). Hands
   are dealt by popping from the end of the deck. The seed makes a deal reproducible, and the
   feed's header records the initial deal.
 * **Never served.** The only code that moves a card out of the deck is `_draw`, which pops the

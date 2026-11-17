@@ -30,12 +30,13 @@ if TYPE_CHECKING:
     from .engine import Game
     from .runner import GameResult
 
-SCHEMA = 1
+SCHEMA = 2  # 2: cards are {color, rank} with no id; a hidden card is null
 Record = dict[str, Any]
 
 
-def card_record(card: Card) -> Record:
-    return {"uid": card.uid, "color": card.color.value, "rank": card.rank}
+def card_record(card: Card | None) -> Record | None:
+    """A card is ``{"color", "rank"}`` and nothing else; ``None`` is a card whose identity is hidden."""
+    return None if card is None else {"color": card.color.value, "rank": card.rank}
 
 
 def event_record(ev: Event) -> Record:
@@ -107,10 +108,6 @@ def read_feed(path: Path) -> list[Record]:
 # --- the observer projection: what ``viewer`` may know --------------------------
 
 
-def _hidden(card: Record) -> Record:
-    return {"uid": card["uid"], "color": None, "rank": None}
-
-
 def project_record(rec: Record, viewer: int, regime: Regime) -> Record:
     """Remove from one record whatever the regime hides from ``viewer``.
 
@@ -119,9 +116,9 @@ def project_record(rec: Record, viewer: int, regime: Regime) -> Record:
     the end) is public and passes through unchanged.
     """
     if rec["type"] == "header":
-        hands = [[c if regime.hand_identity_visible(viewer, seat) else _hidden(c) for c in hand]
+        hands = [[c if regime.hand_identity_visible(viewer, seat) else None for c in hand]
                  for seat, hand in enumerate(rec["deal"]["hands"])]
         return {**rec, "deal": {**rec["deal"], "hands": hands}}
     if rec["type"] == "event" and rec["kind"] == "draw" and not regime.hand_identity_visible(viewer, rec["actor"]):
-        return {**rec, "card": _hidden(rec["card"])}
+        return {**rec, "card": None}
     return rec

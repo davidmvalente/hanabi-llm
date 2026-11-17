@@ -12,12 +12,8 @@ R, Y, G, B, W = Color.RED, Color.YELLOW, Color.GREEN, Color.BLUE, Color.WHITE
 
 def rig(game: Game, hands: list[list[tuple[Color, int]]], deck: list[tuple[Color, int]] | None = None) -> Game:
     """Overwrite hands (and optionally the deck; top of deck = last element)."""
-    uid = 1000
-    new_hands: list[list[Card]] = []
-    for hand in hands:
-        new_hands.append([Card(uid + i, color, rank) for i, (color, rank) in enumerate(hand)])
-        uid += len(hand)
-    game.rig(hands=new_hands, deck=None if deck is None else [Card(uid + i, c, r) for i, (c, r) in enumerate(deck)])
+    game.rig(hands=[[Card(color, rank) for color, rank in hand] for hand in hands],
+             deck=None if deck is None else [Card(c, r) for c, r in deck])
     return game
 
 

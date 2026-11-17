@@ -183,6 +183,21 @@ only how many. Fixed:
   player (required).` Mistakes in read tools stay free.
 * **The budget is 5** rejected actions per turn (the prompt tells the model the number).
 
+## Cards are values (no card ids)
+
+Cards carried an integer `uid`. An audit of every consumer found that nothing needed it: the engine
+keyed hint knowledge by it, the fold used it for one sanity check, the feed and the RDF graphs used it
+to name things, and a `rank = 0` placeholder stood in for "hidden". No model ever saw one (no prompt,
+tool answer or narration prints it), but it sat in the public data model, and the first draft's id
+leak (ids sorted by colour and rank) came from it. Now:
+
+* A card is `Card(color, rank)` and nothing else; two copies are equal, as in the real game.
+* Hint knowledge is attached to the hand slot (`knowledge[seat][slot]`), so it moves with the hand.
+* In the feed a card is `{"color", "rank"}` and a hidden card is `null`; the schema is 2. Older feeds
+  that still carry ids fold the same (the ids are ignored).
+* In the RDF graphs a card is named by where it is (`hand0_2`, `deck_7`, `discard_1`), not by an id.
+* A hidden draw is `DrawEvent(card=None)`, not a placeholder card.
+
 ## v1.1 plan: token parsimony and caching
 
 **Is the conversation cached?** Partly, and not as a "thread". Each API call is

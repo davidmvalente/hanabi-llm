@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from conftest import B, G, R, W, Y, rig
 from hanabi_llm.engine import Game
-from hanabi_llm.model import GiveHint, PlayCard
+from hanabi_llm.model import DiscardCard, GiveHint, PlayCard
 from hanabi_llm.states import state_text
 from hanabi_llm.views import build_view, view_graph
 
@@ -51,17 +53,51 @@ def test_affordance_pointers_only_for_active_player(game2: Game) -> None:
     assert "play_card" not in waiting and "get_state" in waiting
 
 
-def test_card_ids_do_not_encode_identity() -> None:
-    """Regression: ids once ran in colour/rank order, leaking every hidden card."""
-    sequences = set()
+def test_there_are_no_card_ids_and_the_deck_is_shuffled() -> None:
+    """Regression: ids once ran in colour/rank order and leaked every hidden card. Now there are no ids at all."""
+    import dataclasses
+
+    from hanabi_llm.model import Card
+    from hanabi_llm.views import CardView
+
+    assert [f.name for f in dataclasses.fields(Card)] == ["color", "rank"]                    # a card is a (colour, rank) value
+    assert [f.name for f in dataclasses.fields(CardView)] == ["position", "card", "knowledge"]  # a view names a slot, not a card
+    orders = set()
     for seed in range(10):
-        g = Game(["Ann", "Bob"], seed=seed)
-        cards = sorted((c for h in g.state.hands for c in h), key=lambda c: c.uid)
-        identities = [(c.color.value, c.rank) for c in cards]
-        assert identities != sorted(identities)          # not ordered by identity
-        sequences.add(tuple(identities))
-    assert len(sequences) == 10                          # and different for every deal
-    ids_by_seed = {seed: Game(["Ann", "Bob"], seed=seed).state.hands[0][0].uid for seed in range(10)}
-    first_cards = {str(Game(["Ann", "Bob"], seed=s).state.hands[0][0]) for s in range(10)}
-    assert len(first_cards) > 3                          # card #uid is not a fixed identity
-    assert ids_by_seed                                   # (ids exist; they just carry no information)
+        deck = list(Game(["Ann", "Bob"], seed=seed).state.deck)
+        identities = [(c.color.value, c.rank) for c in deck]
+        assert identities != sorted(identities)                       # shuffled, not in colour/rank order
+        orders.add(tuple(identities))
+    assert len(orders) == 10                                          # and different for every deal
+
+
+def test_cards_are_values_two_copies_are_equal_and_a_card_is_validated() -> None:
+    from hanabi_llm.model import Card
+
+    assert Card(B, 1) == Card(B, 1) and Card(B, 1) != Card(B, 2) and len({Card(B, 1), Card(B, 1), Card(R, 1)}) == 2
+    assert str(Card(B, 3)) == "blue 3"
+    for bad in ((B, 0), (B, -1), (B, True), ("blue", 1), (None, 1)):
+        with pytest.raises(ValueError):
+            Card(*bad)  # type: ignore[arg-type]
+
+
+def test_knowledge_is_attached_to_the_slot_so_it_moves_with_the_hand() -> None:
+    """Hints are about slots; when a card leaves, the cards after it (and what was told about them) shift down."""
+    game = Game(["Ann", "Bob"], seed=2)
+    rig(game, [[(R, 1)] * 5, [(B, 1), (G, 2), (R, 3), (Y, 4), (W, 5)]], deck=[(Y, 1)] * 5)
+    game.apply(0, GiveHint(1, R))                                     # Bob's red 3 (slot 2) is now known to be red
+    assert [k.color for k in game.state.knowledge[1]] == [None, None, R, None, None]
+    game.apply(1, DiscardCard(0))                                      # Bob discards slot 0: the red 3 slides to slot 1
+    assert [str(c) for c in game.state.hands[1]][:2] == ["green 2", "red 3"]
+    assert [k.color for k in game.state.knowledge[1]] == [None, R, None, None, None]   # the knowledge moved with it
+    assert len(game.state.knowledge) == len(game.state.hands) and all(len(k) == len(h) for k, h in zip(game.state.knowledge, game.state.hands, strict=True))
+
+
+def test_no_graph_node_is_named_by_a_card_id() -> None:
+    import re
+
+    game = Game(["Ann", "Bob"], seed=2)
+    game.apply(0, DiscardCard(0))
+    names = {str(s).rsplit("#", 1)[1] for s in view_graph(game, build_view(game, 0)).subjects() if "#" in str(s)}
+    assert not [n for n in names if re.fullmatch(r"card\d+", n)]
+    assert {"hand0_0", "hand1_4", "discard_0", "event0_card"} <= names   # cards are named by where they are

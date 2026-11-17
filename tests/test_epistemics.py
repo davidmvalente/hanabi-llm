@@ -54,9 +54,8 @@ def test_the_view_applies_the_regime_to_cards_text_and_graph() -> None:
     view = build_view(game, 0)
     assert all(cv.card is not None for hand in view.hands for cv in hand)           # own cards are visible
     assert "You can see your cards" in state_text(view, game.rules, "hands")
-    own = game.state.hands[0][0]
     g = view_graph(game, view)
-    assert (graph_namespace()[f"card{own.uid}"], HN.hasColor, None) in g
+    assert (graph_namespace()["hand0_0"], HN.hasColor, None) in g
 
 
 def test_a_drawn_card_is_hidden_from_the_drawer_only_because_of_the_hand_regime() -> None:
@@ -64,12 +63,12 @@ def test_a_drawn_card_is_hidden_from_the_drawer_only_because_of_the_hand_regime(
     rig(standard, [[(R, 1)] * 5, [(B, 1)] * 5], deck=[(Y, 5)])
     standard.apply(0, PlayCard(0))
     draw = lambda game, seat: next(e for e in build_view(game, seat).events if isinstance(e, DrawEvent))  # noqa: E731
-    assert draw(standard, 0).card.rank == 0 and draw(standard, 1).card.rank == 5
+    assert draw(standard, 0).card is None and draw(standard, 1).card.rank == 5
 
     variant = open_hand_game()
     rig(variant, [[(R, 1)] * 5, [(B, 1)] * 5], deck=[(Y, 5)])
     variant.apply(0, DiscardCard(0))
-    assert draw(variant, 0).card.rank == 5       # open hands: the drawer sees it too
+    assert draw(variant, 0).card is not None and draw(variant, 0).card.rank == 5     # open hands: the drawer sees it too
 
 
 def test_events_point_at_the_affordance_they_exercise(game2: Game) -> None:

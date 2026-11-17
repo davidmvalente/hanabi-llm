@@ -65,8 +65,9 @@ def truth_graph(game: Game, game_id: str = "g") -> Graph:
                      deck_size=len(st.deck), hints=st.hints, fuses=st.fuses, stacks=st.stacks)
     # No hn:viewer: this is how a truth graph differs from a view graph.
 
-    def place(card_uid: int, zone: object) -> object:
-        node = hg[f"card{card_uid}"]
+    def place(name: str, zone: object) -> object:
+        """A card node, named by the place it occupies (a hand slot, a deck position, ...)."""
+        node = hg[name]
         g.add((node, RDF.type, HN.Card))
         g.add((node, HN.inZone, zone))  # type: ignore[arg-type]
         return node
@@ -75,25 +76,25 @@ def truth_graph(game: Game, game_id: str = "g") -> Graph:
         zone = hg[f"hand{seat}"]
         g.add((zone, RDF.type, HN.Hand))
         for i, card in enumerate(hand):
-            node = place(card.uid, zone)
+            node = place(f"hand{seat}_{i}", zone)
             g.add((node, HN.heldBy, hg[f"player{seat}"]))  # type: ignore[arg-type]
             g.add((node, HN.position, lit(i)))  # type: ignore[arg-type]
             add_identity(g, node, card, iris)  # type: ignore[arg-type]
-            add_knowledge(g, node, st.knowledge[card.uid], iris)  # type: ignore[arg-type]
+            add_knowledge(g, node, st.knowledge[seat][i], iris)  # type: ignore[arg-type]
     deck = hg["deck"]
     g.add((deck, RDF.type, HN.Deck))
     for i, card in enumerate(st.deck):
-        node = place(card.uid, deck)
+        node = place(f"deck_{i}", deck)
         g.add((node, HN.position, lit(i)))  # type: ignore[arg-type]
         add_identity(g, node, card, iris)  # type: ignore[arg-type]
     discard = hg["discard"]
     g.add((discard, RDF.type, HN.DiscardPile))
-    for card in st.discard:
-        node = place(card.uid, discard)
+    for i, card in enumerate(st.discard):
+        node = place(f"discard_{i}", discard)
         g.add((node, HN.discarded, lit(True)))  # type: ignore[arg-type]
         add_identity(g, node, card, iris)  # type: ignore[arg-type]
     for card in st.played:
-        add_identity(g, place(card.uid, hg[f"stack_{card.color.value}"]), card, iris)  # type: ignore[arg-type]
+        add_identity(g, place(f"played_{card.color.value}_{card.rank}", hg[f"stack_{card.color.value}"]), card, iris)  # type: ignore[arg-type]
     return g
 
 

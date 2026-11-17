@@ -33,16 +33,22 @@ from .registry import bind
 
 @dataclass(slots=True)
 class FoldCard:
-    uid: int
-    color: str | None
+    color: str | None  # None = the identity is hidden from whoever this state is for
     rank: int | None
     known_color: str | None = None          # what hints told the holder
     known_rank: int | None = None
     not_colors: list[str] = field(default_factory=list)
     not_ranks: list[int] = field(default_factory=list)
 
+    @classmethod
+    def from_record(cls, card: dict[str, Any] | None) -> FoldCard:
+        """A card from a feed record: ``{"color", "rank"}``, or ``None`` / a null colour when hidden."""
+        if card is None or card.get("color") is None:
+            return cls(None, None)
+        return cls(card["color"], card["rank"])
+
     def to_json(self) -> dict[str, Any]:
-        return {"uid": self.uid, "color": self.color, "rank": self.rank, "known_color": self.known_color,
+        return {"color": self.color, "rank": self.rank, "known_color": self.known_color,
                 "known_rank": self.known_rank, "not_colors": sorted(self.not_colors), "not_ranks": sorted(self.not_ranks)}
 
 
@@ -95,7 +101,7 @@ def initial_state(header: Record) -> FoldState:
     return FoldState.dealt(
         names=list(header["names"]), colors=list(rules["colors"]), top_rank=rules["top_rank"], max_hints=rules["max_hints"],
         initial_hints=rules["initial_hints"], fuses=rules["fuses"],
-        hands=[[FoldCard(c["uid"], c["color"], c["rank"]) for c in hand] for hand in header["deal"]["hands"]],
+        hands=[[FoldCard.from_record(c) for c in hand] for hand in header["deal"]["hands"]],
         deck_size=header["deal"]["deck_size"],
     )
 
@@ -164,23 +170,22 @@ def step(s: FoldState, rec: Record) -> None:
     elif kind in ("play", "discard"):
         _begin_action(s, rec)
         gone = s.hands[rec["actor"]].pop(rec["position"])
-        if gone.uid != rec["card"]["uid"]:
-            raise ValueError(f"feed inconsistent: position {rec['position']} held card {gone.uid}, event says {rec['card']['uid']}")
-        card = rec["card"]  # a played or discarded card is revealed to everyone
+        shown = {"color": rec["card"]["color"], "rank": rec["card"]["rank"]}  # a played or discarded card is revealed to everyone
+        if gone.color is not None and (gone.color, gone.rank) != (shown["color"], shown["rank"]):
+            raise ValueError(f"feed inconsistent: position {rec['position']} held {gone.color} {gone.rank}, the event says {shown['color']} {shown['rank']}")
         if kind == "play" and rec["success"]:
-            s.played.append(card)
-            s.stacks[card["color"]] = card["rank"]
-            if card["rank"] == s.top_rank:
+            s.played.append(shown)
+            s.stacks[shown["color"]] = shown["rank"]
+            if shown["rank"] == s.top_rank:
                 refund_hint(s)
         else:
-            s.discard.append(card)
+            s.discard.append(shown)
             if kind == "play":
                 s.fuses -= 1
             else:
                 refund_hint(s)
     elif kind == "draw":
-        c = rec["card"]
-        s.hands[rec["actor"]].append(FoldCard(c["uid"], c["color"], c["rank"]))
+        s.hands[rec["actor"]].append(FoldCard.from_record(rec["card"]))
         s.deck_size -= 1
         if s.deck_size == 0 and s.final_turns_left is None:
             s.final_turns_left = len(s.names)  # the player who drew the last card also gets a final turn

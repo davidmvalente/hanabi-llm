@@ -5,7 +5,7 @@
 #   scripts/check_viewer.sh [output-dir]       needs: uv, Node, and the `playwright` package for Node
 set -euo pipefail
 cd "$(dirname "$0")/.."
-OUT="${1:-$(mktemp -d)}"; PORT="${PORT:-8791}"
+OUT="${1:-$(mktemp -d)}"; PORT="${PORT:-8791}"; mkdir -p "$OUT"
 uv run python scripts/demo_game.py "$OUT/demo.jsonl" 1 3
 uv run hanabi-view "$OUT/demo.jsonl" --port "$PORT" > "$OUT/viewer.log" 2>&1 &
 SERVER=$!; trap 'kill $SERVER 2>/dev/null || true' EXIT

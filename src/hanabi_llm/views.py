@@ -48,9 +48,8 @@ from .ontology import HN, Regime
 
 @dataclass(frozen=True, slots=True)
 class CardView:
-    """One card as seen by the viewer. ``card`` is None when it is hidden."""
+    """One hand slot as seen by the viewer. ``card`` is None when its identity is hidden."""
 
-    uid: int
     position: int
     card: Card | None
     knowledge: CardKnowledge
@@ -82,7 +81,7 @@ def _redact(event: Event, viewer: Seat, regime: Regime) -> Event:
     replaced by a placeholder with rank 0; renderers show "a new card".
     """
     if isinstance(event, DrawEvent) and not regime.hand_identity_visible(viewer, event.actor):
-        return DrawEvent(event.turn, event.actor, Card(event.card.uid, Color.RED, 0))
+        return DrawEvent(event.turn, event.actor, None)
     return event
 
 
@@ -99,10 +98,9 @@ def build_view(game: Game, viewer: Seat) -> PlayerView:
         hands.append(
             tuple(
                 CardView(
-                    uid=c.uid,
                     position=i,
                     card=c if regime.hand_identity_visible(viewer, seat) else None,
-                    knowledge=st.knowledge[c.uid],
+                    knowledge=st.knowledge[seat][i],
                 )
                 for i, c in enumerate(hand)
             )
@@ -214,6 +212,13 @@ def add_knowledge(g: Graph, node: URIRef, k: CardKnowledge, iris: Iris) -> None:
         g.add((node, HN.excludedRank, iris.rank[r]))
 
 
+def _event_card(g: Graph, event: URIRef, node: URIRef, card: Card, iris: Iris) -> None:
+    """The card an event revealed, as a node of its own (there are no card ids to share one)."""
+    g.add((node, RDF.type, HN.Card))
+    add_identity(g, node, card, iris)
+    g.add((event, HN.card, node))
+
+
 def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
     """RDF graph of one seat's view: the ontology plus what the seat may see.
 
@@ -232,8 +237,8 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
     # Discard pile: identities are public (see the regime in the ontology).
     discard = hg["discard"]
     g.add((discard, RDF.type, HN.DiscardPile))
-    for card in view.discard:
-        node = hg[f"card{card.uid}"]
+    for i, card in enumerate(view.discard):
+        node = hg[f"discard_{i}"]  # a card is named by where it is, never by an id
         g.add((node, RDF.type, HN.Card))
         g.add((node, HN.inZone, discard))
         g.add((node, HN.discarded, lit(True)))
@@ -244,7 +249,7 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
         zone = hg[f"hand{seat}"]
         g.add((zone, RDF.type, HN.Hand))
         for cv in hand:
-            node = hg[f"card{cv.uid}"]
+            node = hg[f"hand{seat}_{cv.position}"]
             g.add((node, RDF.type, HN.Card))
             g.add((node, HN.heldBy, hg[f"player{seat}"]))
             g.add((node, HN.inZone, zone))
@@ -273,13 +278,12 @@ def view_graph(game: Game, view: PlayerView, game_id: str = "g") -> Graph:
         if isinstance(ev, PlayEvent):
             g.add((node, RDF.type, HN.PlayEvent))
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))
-            g.add((node, HN.card, hg[f"card{ev.card.uid}"]))
-            add_identity(g, hg[f"card{ev.card.uid}"], ev.card, iris)  # a played card is revealed to all
+            _event_card(g, node, hg[f"event{i}_card"], ev.card, iris)  # a played card is revealed to all
             g.add((node, HN.succeeded, lit(ev.success)))
         elif isinstance(ev, DiscardEvent):
             g.add((node, RDF.type, HN.DiscardEvent))
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))
-            g.add((node, HN.card, hg[f"card{ev.card.uid}"]))
+            _event_card(g, node, hg[f"event{i}_card"], ev.card, iris)  # a discarded card is revealed to all
         elif isinstance(ev, HintEvent):
             g.add((node, RDF.type, HN.HintEvent))
             g.add((node, HN.actor, hg[f"player{ev.actor}"]))

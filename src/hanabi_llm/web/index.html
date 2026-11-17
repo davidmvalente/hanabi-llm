@@ -186,7 +186,7 @@ function renderSegments(line, segs) {
     else if (g.k === "text") line.append(g.v);
     else if (g.k === "value") line.append(g.attribute === "color" ? el("b", "", g.value, { color: COLOR[g.value] }) : el("b", "", "rank " + g.value));
     else if (g.k === "card") {
-      const hidden = g.card.color === null || !g.card.rank || (g.secret_from !== undefined && names()[g.secret_from] === blind);
+      const hidden = g.card === null || g.card.color === null || (g.secret_from !== undefined && names()[g.secret_from] === blind);
       line.append(hidden ? "a card" : chip(g.card));
     } else if (g.k === "mark") line.append(el("span", g.tone === "ok" ? "ok" : "no", (g.tone === "ok" ? "✓ " : "✗ ") + g.v));
   }

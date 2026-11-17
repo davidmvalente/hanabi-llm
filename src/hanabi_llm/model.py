@@ -26,11 +26,19 @@ class Color(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Card:
-    """A physical card. ``uid`` is stable for the whole game."""
+    """A card as the game sees it: a colour and a rank, nothing else.
 
-    uid: int
+    Two copies of the same card are equal, as in the real game. Which copy is meant is
+    always said by WHERE it is (a slot in a hand, a place in the discard pile), never by
+    an identifier: there is no card id anywhere in the game's world.
+    """
+
     color: Color
     rank: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.color, Color) or isinstance(self.rank, bool) or not isinstance(self.rank, int) or self.rank < 1:
+            raise ValueError(f"a card is a Color and a rank of 1 or more, got {self.color!r}, {self.rank!r}")
 
     def __str__(self) -> str:
         return f"{self.color.value} {self.rank}"
@@ -145,12 +153,13 @@ class HintEvent:
 class DrawEvent:
     """``actor`` drew ``card`` into their last slot.
 
-    The *drawer* must not see ``card``; views redact it for them.
+    ``card`` is ``None`` where the viewer may not see it (a player's own draw): the draw
+    happened, the identity is hidden.
     """
 
     turn: int
     actor: Seat
-    card: Card
+    card: Card | None
 
 
 @dataclass(frozen=True, slots=True)

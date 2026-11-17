@@ -68,8 +68,9 @@ class GameState:
     final_turns_left: int | None
     #: Cards placed on the fireworks, in play order.
     played: tuple[Card, ...]
-    #: What hints have told the holder about each card still in a hand.
-    knowledge: Mapping[int, CardKnowledge]
+    #: What hints have told the holder about each card still in a hand: ``knowledge[seat][position]``,
+    #: parallel to ``hands``. It is attached to the slot, so it moves with the card as the hand shifts.
+    knowledge: tuple[tuple[CardKnowledge, ...], ...]
     events: tuple[Event, ...]
     over_reason: str | None
 
@@ -160,7 +161,7 @@ def _hint_targets_cards(state: GameState, rules: RuleSet, actor: Seat, action: A
 
 def _card(fc: FoldCard) -> Card:
     assert fc.color is not None and fc.rank is not None, "the engine's own state always knows every identity"
-    return Card(fc.uid, Color(fc.color), fc.rank)
+    return Card(Color(fc.color), fc.rank)
 
 
 def _draw_event(game: Game, actor: Seat, turn: int) -> list[Event]:
@@ -225,7 +226,7 @@ class Game:
             for _ in range(copies)
         ]
         random.Random(seed).shuffle(identities)
-        deck = [Card(uid, color, rank) for uid, (color, rank) in enumerate(identities)]
+        deck = [Card(color, rank) for color, rank in identities]
         self.seed = seed
 
         hand_size = rules.hand_size_by_players[n]
@@ -236,7 +237,7 @@ class Game:
         self._fold = FoldState.dealt(
             names=list(player_names), colors=[c.value for c in rules.colors], top_rank=rules.top_rank,
             max_hints=rules.max_hints, initial_hints=rules.initial_hints, fuses=rules.initial_fuses,
-            hands=[[FoldCard(c.uid, c.color.value, c.rank) for c in hand] for hand in hands], deck_size=len(deck),
+            hands=[[FoldCard(c.color.value, c.rank) for c in hand] for hand in hands], deck_size=len(deck),
         )
         self._events: list[Event] = []
         self._snapshot: GameState | None = None
@@ -258,15 +259,14 @@ class Game:
                 names=list(f.names),
                 hands=tuple(tuple(_card(c) for c in hand) for hand in f.hands),
                 deck=tuple(self._deck),
-                discard=tuple(Card(c["uid"], Color(c["color"]), c["rank"]) for c in f.discard),
+                discard=tuple(Card(Color(c["color"]), c["rank"]) for c in f.discard),
                 stacks=MappingProxyType({Color(c): h for c, h in f.stacks.items()}),
                 hints=f.hints, fuses=f.fuses, current=f.current, turn=f.turn, final_turns_left=f.final_turns_left,
-                played=tuple(Card(c["uid"], Color(c["color"]), c["rank"]) for c in f.played),
-                knowledge=MappingProxyType({
-                    c.uid: CardKnowledge(
-                        color=Color(c.known_color) if c.known_color else None, rank=c.known_rank,
-                        not_colors=frozenset(Color(x) for x in c.not_colors), not_ranks=frozenset(c.not_ranks))
-                    for hand in f.hands for c in hand}),
+                played=tuple(Card(Color(c["color"]), c["rank"]) for c in f.played),
+                knowledge=tuple(tuple(
+                    CardKnowledge(color=Color(c.known_color) if c.known_color else None, rank=c.known_rank,
+                                  not_colors=frozenset(Color(x) for x in c.not_colors), not_ranks=frozenset(c.not_ranks))
+                    for c in hand) for hand in f.hands),
                 events=tuple(self._events), over_reason=f.over_reason,
             )
         return self._snapshot
@@ -281,17 +281,18 @@ class Game:
         stacks: Mapping[Color, int] | None = None,
         hints: int | None = None,
         fuses: int | None = None,
-        knowledge: Mapping[int, CardKnowledge] | None = None,
+        knowledge: Mapping[tuple[int, int], CardKnowledge] | None = None,
     ) -> None:
         """Set up a position directly, for tests and for putting a decision-maker on a fixed scenario.
 
         This bypasses the rules, so it can create positions the rules never would (for
         example hands that do not add up to a real deck); the SHACL audit rejects those.
-        The top of ``deck`` is its last element. ``knowledge`` is applied to cards in hands.
+        The top of ``deck`` is its last element. ``knowledge`` maps (seat, position) to what that hand
+        slot has been told.
         """
         f = self._fold
         if hands is not None:
-            f.hands = [[FoldCard(c.uid, c.color.value, c.rank) for c in hand] for hand in hands]
+            f.hands = [[FoldCard(c.color.value, c.rank) for c in hand] for hand in hands]
         if deck is not None:
             self._deck = list(deck)
             f.deck_size = len(self._deck)
@@ -302,9 +303,8 @@ class Game:
         if fuses is not None:
             f.fuses = fuses
         if knowledge:
-            held = {c.uid: c for hand in f.hands for c in hand}
-            for uid, k in knowledge.items():
-                c = held[uid]
+            for (seat, position), k in knowledge.items():
+                c = f.hands[seat][position]
                 c.known_color, c.known_rank = (k.color.value if k.color else None), k.rank
                 c.not_colors, c.not_ranks = [x.value for x in k.not_colors], list(k.not_ranks)
         self._snapshot = None

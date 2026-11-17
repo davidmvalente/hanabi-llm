@@ -92,7 +92,7 @@ def test_no_hint_tokens_and_wrong_turn(game2: Game) -> None:
 def test_hint_updates_public_knowledge(game2: Game) -> None:
     rig(game2, [[(R, 1)] * 5, [(B, 1), (R, 2), (B, 3), (G, 4), (W, 5)]])
     game2.apply(0, GiveHint(1, B))
-    k = [game2.state.knowledge[c.uid] for c in game2.state.hands[1]]
+    k = list(game2.state.knowledge[1])
     assert [x.color for x in k] == [B, None, B, None, None]
     assert k[1].not_colors == {B}  # a blue hint that skipped this card rules blue out
 
@@ -138,7 +138,7 @@ def test_a_hint_targets_exactly_the_matching_subset_of_the_hand(game2: Game) -> 
     (event,) = game2.apply(0, GiveHint(1, B))
     assert (event.receiver, event.value, event.targets, event.attribute) == (1, B, (0, 2, 4), "color")  # type: ignore[union-attr]
     # complete: the targets ARE blue, every card left out is NOT blue
-    k = [game2.state.knowledge[c.uid] for c in game2.state.hands[1]]
+    k = list(game2.state.knowledge[1])
     assert [x.color for x in k] == [B, None, B, None, B]
     assert [x.not_colors for x in k] == [set(), {B}, set(), {B}, set()]
 
@@ -147,7 +147,7 @@ def test_a_rank_hint_is_complete_in_the_same_way(game2: Game) -> None:
     rig(game2, [[(R, 1)] * 5, [(B, 1), (R, 2), (B, 1), (G, 4), (B, 5)]])
     (event,) = game2.apply(0, GiveHint(1, 1))
     assert (event.value, event.targets, event.attribute) == (1, (0, 2), "rank")  # type: ignore[union-attr]
-    k = [game2.state.knowledge[c.uid] for c in game2.state.hands[1]]
+    k = list(game2.state.knowledge[1])
     assert [x.rank for x in k] == [1, None, 1, None, None]
     assert [x.not_ranks for x in k] == [set(), {1}, set(), {1}, {1}]
 
@@ -221,8 +221,7 @@ def test_rig_sets_a_position_and_leaves_the_rest_alone(game2: Game) -> None:
     game2.rig(stacks={R: 3}, hints=2, fuses=1)
     st = game2.state
     assert (st.stacks[R], st.hints, st.fuses, st.stacks[B]) == (3, 2, 1, 0)
-    uid = st.hands[1][0].uid
-    game2.rig(knowledge={uid: CardKnowledge(color=B, not_ranks=frozenset({2}))})
-    assert game2.state.knowledge[uid] == CardKnowledge(color=B, not_ranks=frozenset({2}))
-    with pytest.raises(KeyError):
-        game2.rig(knowledge={999999: CardKnowledge()})                      # knowledge is for cards in hands only
+    game2.rig(knowledge={(1, 0): CardKnowledge(color=B, not_ranks=frozenset({2}))})        # (seat, position) of a hand slot
+    assert game2.state.knowledge[1][0] == CardKnowledge(color=B, not_ranks=frozenset({2}))
+    with pytest.raises(IndexError):
+        game2.rig(knowledge={(1, 99): CardKnowledge()})                     # knowledge is for slots that exist
