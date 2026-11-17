@@ -7,7 +7,7 @@ engine whose rules and affordances are declared in an RDF ontology.
 
 ```bash
 uv sync
-uv run pytest                       # 149 tests, no network needed
+uv run pytest                       # 183 tests, no network needed
 uv run hanabi-llm --models random,random,random --seed 3          # offline bots
 export OPENROUTER_API_KEY=...       # then, for real models (one per seat, 2-5):
 uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 --log game.jsonl
@@ -24,6 +24,8 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
 | `engine.py` | Authoritative state, legal-move enumeration, rule enforcement, event log |
 | `views.py` | Per-seat redacted projection -> RDF graph + prompt text (the only place secrets are removed) |
 | `tools.py` | Affordances -> OpenAI-style tool schemas; validates actions; dispatches the read tools |
+| `narrate.py` | The one wording of events (typed segments, flattened to text), shared by the prompt history, the CLI and the viewer |
+| `knowledge/` | Optional knowledge graphs (notes models may consult); none in the baseline. See `docs/KNOWLEDGE.md` |
 | `feed.py`, `fold.py` | The game feed (JSONL), the observer projection, and the reference fold that rebuilds any state from it |
 | `viewer.py`, `web/` | Live viewer: follows a feed and streams folded states to a one-page browser UI |
 | `validate.py`, `shapes/` | Ground-truth graph and SHACL audit: structure, conservation and the epistemic regime, checked on every graph |
@@ -64,6 +66,13 @@ uv run hanabi-llm --models <openrouter-model-id>,<openrouter-model-id> --seed 7 
   lists: models learn those through `explain_rules` and `get_state`. Released
   versions are never edited; add `system.v2.yaml` instead. The version and
   sha256 go in every log header (`--prompt v1`).
+* **The baseline has no strategy knowledge.** Optional knowledge graphs (`--knowledge mdk`) add a
+  `get_concepts` tool so that arms can be compared; the choice is logged in the feed header.
+  `--api-url` points the same pipeline at any OpenAI-compatible endpoint.
+* **Events read as sentences, with the card's colour in the text:** `T7 Alice hinted Carol:
+  position 3 is green`, `T8 Bob discarded blue 1 from position 1`, `T10 Alice played blue 2 from
+  position 2 -> misfire (fuse lost)`. One definition (`narrate.py`) serves the prompt history, the
+  CLI and the viewer.
 * **A hint is one value.** `give_hint(player, hint)`, where `hint` is a colour or a rank; the
   attribute follows from the value, so "both" or "neither" cannot be written. The hint always
   covers every card of the receiver's hand with that value, so its *targets* are a subset of the

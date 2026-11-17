@@ -1,11 +1,12 @@
 """The tools a model can call, built from the ontology's affordances.
 
-Exactly three families, mutually exclusive and together exhaustive:
+Three families, mutually exclusive and together exhaustive, plus an optional fourth:
 
   action   play_card, discard_card, give_hint   change the game; the first
                                                 accepted one ends the turn
   state    get_state                            read what is true now
   rules    explain_rules                        read how the game works
+  knowledge get_concepts                        only with a knowledge graph loaded; never in the baseline
 
 Action tools are validated here with ``Game.check`` but NOT applied: the
 referee applies them, so a model has no path to mutate the game except
@@ -21,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .engine import Game
-from .explain import explain, topics
+from .explain import explain, explain_concepts, topics
 from .model import Action, Color, DiscardCard, GiveHint, HintValue, IllegalAction, PlayCard, Seat
 from .ontology import AffordanceSpec, ParamSpec, RuleSet
 from .registry import FUNCTIONS, bind
@@ -55,6 +56,13 @@ def _tool_get_state(ctx: ToolContext, args: JSON) -> str:
 def _tool_explain_rules(ctx: ToolContext, args: JSON) -> str:
     topic = args.get("topic")
     return explain(ctx.game.ontology, None if topic is None else str(topic))
+
+
+@bind("tool_get_concepts")
+def _tool_get_concepts(ctx: ToolContext, args: JSON) -> str:
+    """Only offered when a knowledge graph is loaded (the baseline has no such tool)."""
+    cat, name = args.get("category"), args.get("name")
+    return explain_concepts(ctx.game.ontology, None if cat is None else str(cat), None if name is None else str(name))
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +207,7 @@ class ToolBox:
         if declared != SECTIONS:
             raise RuntimeError(f"get_state sections in the ontology {declared} differ from the code {SECTIONS}")
 
-    _FAMILY_ORDER = ("action", "state", "rules")
+    _FAMILY_ORDER = ("action", "state", "rules", "knowledge")
 
     def schemas(self) -> list[JSON]:
         specs = sorted(self._game.ontology.affordances.values(),

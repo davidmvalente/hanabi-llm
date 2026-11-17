@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from .fold import FoldState, initial_state, step
+from .narrate import segments
 
 POLL_SECONDS = 0.2
 KEEPALIVE_SECONDS = 15.0
@@ -65,7 +66,10 @@ def frames(path: Path, *, wait_for_file: float = 30.0, follow: bool = True) -> I
             else:
                 step(state, rec)
             assert state is not None
-            yield {"i": index, "record": rec, "state": state.to_json()}
+            frame: dict[str, Any] = {"i": index, "record": rec, "state": state.to_json()}
+            if rec["type"] == "event":
+                frame["segments"] = segments(rec)  # the wording is defined in narrate.py, not in the page
+            yield frame
             index += 1
             if rec["type"] == "result":
                 return

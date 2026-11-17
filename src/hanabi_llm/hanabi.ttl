@@ -49,11 +49,6 @@ hn:HintEvent    a rdfs:Class ; rdfs:subClassOf hn:Event .
 hn:DrawEvent    a rdfs:Class ; rdfs:subClassOf hn:Event .
 hn:EndEvent     a rdfs:Class ; rdfs:subClassOf hn:Event .
 
-hn:Concept      a rdfs:Class ; rdfs:comment "A piece of game knowledge a player may consult: mechanics, dynamics or kinetics." .
-hn:Mechanic     a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Local rules of a turn: what an action does to the state." .
-hn:Dynamic      a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Macro behaviour over time: phases, cycles, clocks, feedback." .
-hn:Kinetic      a rdfs:Class ; rdfs:subClassOf hn:Concept ; rdfs:comment "Causal potentials: the quantities that drive the dynamics (mass, inertia, torque...)." .
-
 hn:Affordance   a rdfs:Class ; rdfs:subClassOf hn:Executable ; rdfs:comment "A callable game capability offered to a player." .
 hn:Parameter    a rdfs:Class ; rdfs:comment "A typed argument of an affordance (becomes a tool-call argument)." .
 hn:Executable   a rdfs:Class ; rdfs:comment "Something the engine runs by registered function name: a rule or an affordance." .
@@ -121,16 +116,10 @@ hn:canInvoke      a rdf:Property ; rdfs:domain hn:Player ; rdfs:range hn:Afforda
 hn:isActivePlayer a rdf:Property ; rdfs:domain hn:Player ; rdfs:range xsd:boolean .
 hn:discarded      a rdf:Property ; rdfs:domain hn:Card ; rdfs:range xsd:boolean .
 hn:optional       a rdf:Property ; rdfs:domain hn:Parameter ; rdfs:range xsd:boolean .
-hn:summary        a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string .
-hn:guidance       a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string ;
-                  rdfs:comment "Actionable advice that follows from the concept." .
-hn:measuredBy     a rdf:Property ; rdfs:domain hn:Concept ;
-                  rdfs:comment "Graph property or tool from which the quantity can be read or computed." .
-hn:conceptName    a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string .
 hn:endsTurn       a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:boolean ;
                   rdfs:comment "True for the three actions; false for read-only or note-taking tools." .
 hn:family             a rdf:Property ; rdfs:domain hn:Affordance ; rdfs:range xsd:string ;
-                      rdfs:comment "Tool family: action (ends the turn), state or rules. Drives the prompt layout." .
+                      rdfs:comment "Tool family: action (ends the turn), state or rules; knowledge only when a knowledge graph is loaded." .
 hn:ruleName           a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string ;
                       rdfs:comment "Short model-facing name of the rule (what explain_rule accepts)." .
 hn:rationale          a rdf:Property ; rdfs:domain hn:Rule ; rdfs:range xsd:string ;
@@ -385,97 +374,3 @@ hn:knownColor    hn:visibility hn:Public .
 hn:knownRank     hn:visibility hn:Public .
 hn:excludedColor hn:visibility hn:Public .
 hn:excludedRank  hn:visibility hn:Public .
-
-# ---------------------------------------------------------------------------
-# 8. Game knowledge: mechanics, dynamics, kinetics
-#    Part of the initial graph, so models can also reach it through SPARQL:
-#      SELECT ?n ?g WHERE { ?c a hn:Kinetic ; hn:conceptName ?n ; hn:guidance ?g }
-# ---------------------------------------------------------------------------
-
-# --- Mechanics: what one action does -----------------------------------------
-
-hn:OneActionPerTurn a hn:Mechanic ; hn:conceptName "one_action_per_turn" ;
-    hn:summary "Each turn is exactly one of: play a card, discard a card, give a hint. Reading tools are free." ;
-    hn:guidance "Information requests never cost a turn, so check the state, the discard pile and your odds before acting." .
-
-hn:HintGrammar a hn:Mechanic ; hn:conceptName "hint_grammar" ;
-    hn:summary "A hint names one colour or one rank and reveals EVERY matching card in a teammate's hand, including the positions that do not match (negative information)." ;
-    hn:guidance "Pick the hint whose touched set is most informative. A hint that touches one card of the right kind usually means 'play that one'. Cards NOT touched are also informed: they are not that colour or rank." .
-
-hn:HandShift a hn:Mechanic ; hn:conceptName "hand_shift" ;
-    hn:summary "Positions are 0-based. When a card leaves your hand, later cards slide down one slot and the new card enters in the LAST slot." ;
-    hn:guidance "Track positions after every play or discard, yours and your teammates'. A hint's meaning is tied to the positions at the time it was given." .
-
-hn:HintRefund a hn:Mechanic ; hn:conceptName "hint_refund" ;
-    hn:summary "Discarding returns one hint token (never above the maximum). Completing a stack with its 5 also returns one." ;
-    hn:measuredBy hn:HintState ;
-    hn:guidance "Discarding when you are already at the maximum gains nothing: prefer a useful hint or a safe play then." .
-
-hn:FinalRound a hn:Mechanic ; hn:conceptName "final_round" ;
-    hn:summary "When the last card is drawn, every player (the drawer included) gets one more turn, then the game ends." ;
-    hn:measuredBy hn:deckSize ;
-    hn:guidance "In the final round discards no longer help anyone. Gamble on plays that are likely right; a misfire costs less than an unplayed card." .
-
-# --- Dynamics: behaviour over time -------------------------------------------
-
-hn:HintDiscardCycle a hn:Dynamic ; hn:conceptName "hint_discard_cycle" ;
-    hn:summary "Hints are spent to move information; discards (and completed 5s) recover them. The team trades card supply for information supply." ;
-    hn:measuredBy hn:HintState ;
-    hn:guidance "With few tokens left, a discard is how you buy the next hint. With many, spend them on hints that unlock plays instead of discarding good cards." .
-
-hn:GamePhases a hn:Dynamic ; hn:conceptName "game_phases" ;
-    hn:summary "Early: tokens plentiful, fuses full, cheap information. Middle: tokens scarce, discards grow, risk of discarding something needed. End: the deck is empty and every turn counts." ;
-    hn:measuredBy hn:deckSize ;
-    hn:guidance "Be generous with hints early, careful with discards in the middle, and willing to gamble at the end." .
-
-hn:DeckClock a hn:Dynamic ; hn:conceptName "deck_clock" ;
-    hn:summary "The deck shrinks by one card per turn (while it lasts), so the game length is roughly fixed by the player count." ;
-    hn:measuredBy hn:deckSize ;
-    hn:guidance "Count the cards left in the deck and ask how many useful turns remain. Stalling spends clock." .
-
-hn:Irreversibility a hn:Dynamic ; hn:conceptName "irreversibility" ;
-    hn:summary "When every copy of a card is gone (played or discarded), the fireworks that needed it can never be completed. Each 5 has a single copy." ;
-    hn:guidance "Before discarding, check the discard pile for copies of that card. Never discard a card that might be a 5 or a last copy." .
-
-hn:InformationDecay a hn:Dynamic ; hn:conceptName "information_decay" ;
-    hn:summary "Hints go stale. A colour hint is worth little once that colour's stack is complete; a rank hint is worth little once every copy of that rank is played." ;
-    hn:guidance "Reread what each hinted card could still be. A card that every stack has already passed is safe to discard." .
-
-hn:FiveMomentum a hn:Dynamic ; hn:conceptName "five_momentum" ;
-    hn:summary "Completing a stack with a 5 refunds a hint token, which funds further hints, which enable further plays." ;
-    hn:guidance "Finishing a stack when tokens are low is worth extra: it refinances the team." .
-
-hn:Stalling a hn:Dynamic ; hn:conceptName "stalling" ;
-    hn:summary "A hint or a discard is a safe way to pass the turn, but it burns deck clock." ;
-    hn:guidance "Stall only while waiting costs less than a risky play. Near the end, stalling is usually wrong." .
-
-# --- Kinetics: causal potentials ---------------------------------------------
-
-hn:CardMass a hn:Kinetic ; hn:conceptName "card_mass" ;
-    hn:summary "How much a card matters: scarcity times progress. A last copy of a needed card is heavy; a spare 1 is light." ;
-    hn:measuredBy hn:copiesPerColor ;
-    hn:guidance "Protect heavy cards: hint them, never discard them. Discard light cards first." .
-
-hn:BeliefInertia a hn:Kinetic ; hn:conceptName "belief_inertia" ;
-    hn:summary "Once a card has been hinted, its holder's belief about it is hard to change. A teammate who was told a card is 'blue' will keep treating it as a blue card to play." ;
-    hn:measuredBy hn:knownColor ;
-    hn:guidance "Hint with the future in mind: your hint commits the receiver to a plan." .
-
-hn:HintTorque a hn:Kinetic ; hn:conceptName "hint_torque" ;
-    hn:summary "Leverage of a hint: how much it changes what the receiver will do. Touching a card that is playable right now has high leverage; touching a dead card has almost none." ;
-    hn:measuredBy hn:targetedPosition ;
-    hn:guidance "Prefer the hint with the greatest effect on the receiver's next action. If a hint can be read two ways, the receiver may pick the wrong one." .
-
-hn:ActivationEnergy a hn:Kinetic ; hn:conceptName "activation_energy" ;
-    hn:summary "The certainty you need before playing. The barrier is the fuse token you lose if you are wrong." ;
-    hn:measuredBy hn:FuseState ;
-    hn:guidance "Use estimate_card. With 3 fuses play at moderate odds; with 1 fuse require near certainty." .
-
-hn:CollisionRate a hn:Kinetic ; hn:conceptName "collision_rate" ;
-    hn:summary "Randomness enters through the deck. The chance an unseen card is a given card is (copies remaining) / (unseen cards)." ;
-    hn:guidance "Count what you can see: other hands, discard pile and stacks. The rest is the pool your cards and the deck draw from. estimate_card does this for you." .
-
-hn:PotentialEnergy a hn:Kinetic ; hn:conceptName "potential_energy" ;
-    hn:summary "Hint tokens are stored potential: spending one converts it into information; discarding refills the store." ;
-    hn:measuredBy hn:HintState ;
-    hn:guidance "Do not hoard tokens: unspent potential at the end of the game is wasted." .

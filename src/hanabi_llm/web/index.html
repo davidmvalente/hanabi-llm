@@ -50,9 +50,9 @@
   .card .know { font-size: 11px; color: var(--muted); min-height: 2.6em; line-height: 1.25; overflow-wrap: anywhere; }
   .hidden-hand { font-size: 12px; color: var(--muted); font-style: italic; }
   #log { height: 13rem; overflow-y: auto; font-size: 14px; display: grid; align-content: start; gap: 2px; }
-  #log div { padding: 1px 2px; } #log .t { color: var(--muted); font-size: 12px; margin-right: 6px; }
+  #log div { padding: 1px 2px; } #log .t { color: var(--muted); font-size: 12px; }
   #log .muted { color: var(--muted); } #log .ok { color: var(--good); } #log .no { color: var(--bad); font-weight: 600; }
-  #log .pname { font-weight: 600; } #log .chip { display: inline-block; min-width: 1.4em; text-align: center; border-radius: 3px; padding: 0 3px; font-weight: 700; font-size: 12px; }
+  #log .pname { font-weight: 600; } #log .chip { display: inline-block; text-align: center; border-radius: 3px; padding: 0 5px; font-weight: 700; font-size: 12px; white-space: nowrap; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .controls input[type=range] { flex: 1 1 200px; padding: 0; accent-color: var(--blue); }
   .controls label { color: var(--muted); }
@@ -175,35 +175,43 @@ function drawHands(s, header) {
   }));
 }
 
-function logLine(rec) {
-  const line = el("div"), nm = (seat) => names()[seat];
-  const chip = (c) => el("span", "chip" + (DARK_TEXT.has(c.color) ? " dark" : ""), c.rank, { background: COLOR[c.color], color: DARK_TEXT.has(c.color) ? "#15171d" : "#fff" });
-  if (rec.type === "result") {
-    line.append(el("span", "t", "end"), rec.fault ? el("span", "no", `Aborted: ${rec.fault.player} - ${rec.fault.kind}: ${rec.fault.detail}`)
-                                                  : el("span", "muted", `Result: ${rec.status}, score ${rec.score}, official ${rec.official_score}`));
-    return line;
+// The wording comes from the server (narrate.py) as typed segments; this only styles them.
+function chip(c) {                                   // "blue 1": the colour is also in the TEXT, so it survives copy and paste
+  return el("span", "chip", `${c.color} ${c.rank}`, { background: COLOR[c.color], color: DARK_TEXT.has(c.color) ? "#15171d" : "#fff" });
+}
+function renderSegments(line, segs) {
+  for (const g of segs) {
+    if (g.k === "turn") line.append(el("span", "t", "T" + g.v), " ");
+    else if (g.k === "player") line.append(who(g.seat));
+    else if (g.k === "text") line.append(g.v);
+    else if (g.k === "value") line.append(g.attribute === "color" ? el("b", "", g.value, { color: COLOR[g.value] }) : el("b", "", "rank " + g.value));
+    else if (g.k === "card") {
+      const hidden = g.card.color === null || !g.card.rank || (g.secret_from !== undefined && names()[g.secret_from] === blind);
+      line.append(hidden ? "a card" : chip(g.card));
+    } else if (g.k === "mark") line.append(el("span", g.tone === "ok" ? "ok" : "no", (g.tone === "ok" ? "✓ " : "✗ ") + g.v));
   }
-  line.append(el("span", "t", "T" + rec.turn));
-  if (rec.kind === "hint") {
-    const v = rec.attribute === "color" ? el("b", "", rec.value, { color: COLOR[rec.value] }) : el("b", "", "rank " + rec.value);
-    line.append(who(rec.actor), " hinted ", who(rec.receiver), ": ", v, ` cards at positions [${rec.targets.join(", ")}]`, el("span", "muted", "; the rest are not"));
-  } else if (rec.kind === "play") {
-    line.append(who(rec.actor), ` played position ${rec.position}: `, chip(rec.card), rec.success ? el("span", "ok", " ✓ placed") : el("span", "no", " ✗ misfire"));
-  } else if (rec.kind === "discard") {
-    line.append(who(rec.actor), ` discarded position ${rec.position}: `, chip(rec.card));
-  } else if (rec.kind === "draw") {
-    const hide = nm(rec.actor) === blind || rec.card.color === null;
-    line.classList.add("muted"); line.append(who(rec.actor), " drew ", hide ? "a card" : chip(rec.card));
-  } else if (rec.kind === "end") {
-    line.append(el("span", "no", `Game over: ${rec.reason}`), ` · score ${rec.score}`);
-  }
+}
+
+function resultLine(rec) {
+  const line = el("div"); line.append(el("span", "t", "end"), " ");
+  line.append(rec.fault ? el("span", "no", `Aborted: ${rec.fault.player} - ${rec.fault.kind}: ${rec.fault.detail}`)
+                        : el("span", "muted", `Result: ${rec.status}, score ${rec.score}, official ${rec.official_score}`));
   return line;
 }
 
 function drawLog() {
   const log = $("log"), atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
-  const lines = [];
-  for (let i = 1; i <= k; i++) if (frames[i].record.type !== "header") lines.push(logLine(frames[i].record));
+  const lines = []; let last = null;                 // `last` = the line of the previous action, so its draw joins it
+  for (let i = 1; i <= k; i++) {
+    const f = frames[i], rec = f.record;
+    if (rec.type === "result") { lines.push(resultLine(rec)); last = null; continue; }
+    if (rec.kind === "draw" && last && last.actor === rec.actor && last.turn === rec.turn) {
+      last.line.append(" and"); renderSegments(last.line, f.segments.filter((g) => g.k !== "turn" && g.k !== "player"));
+      last = null; continue;
+    }
+    const line = el("div"); renderSegments(line, f.segments); lines.push(line);
+    last = rec.kind === "play" || rec.kind === "discard" ? { line, actor: rec.actor, turn: rec.turn } : null;
+  }
   log.replaceChildren(...lines);
   if (follow || atBottom) requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });  // after layout
 }

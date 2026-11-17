@@ -97,7 +97,7 @@ def test_discard_and_history(game2: Game) -> None:
     assert "empty" in text(game2, 0, "discard")
     game2.apply(0, PlayCard(0))  # misfire: the red 3 is discarded for everyone to see
     assert "red 3" in text(game2, 1, "discard")
-    assert "MISFIRE" in text(game2, 1, "history")
+    assert "misfire (fuse lost)" in text(game2, 1, "history")
 
 
 def test_history_keeps_only_the_most_recent_events() -> None:

@@ -69,6 +69,25 @@ def _overview(onto: Ontology) -> str:
     return "\n".join(lines)
 
 
+def explain_concepts(onto: Ontology, category: str | None, name: str | None) -> str:
+    """The notes of the loaded knowledge graphs: an overview by category, or one note in full."""
+    concepts = onto.concepts
+    if name:
+        key = name.strip().lower().replace("-", "_").replace(" ", "_")
+        if key not in concepts:
+            raise IllegalAction(f"Unknown note {name!r}. Notes: {sorted(concepts)}")
+        c = concepts[key]
+        return f"[{c.category}] {c.name}\n{c.summary}\nGuidance: {c.guidance}"
+    categories = sorted({c.category for c in concepts.values()})
+    wanted = category.strip().lower() if category else None
+    if wanted and wanted not in categories:
+        raise IllegalAction(f"Unknown category {category!r}. Categories: {categories}")
+    lines = [f"[{c.category}] {c.name}: {c.summary}"
+             for c in sorted(concepts.values(), key=lambda c: (c.category, c.name)) if wanted is None or c.category == wanted]
+    lines.append("Call get_concepts with `name` to read the guidance of one note.")
+    return "\n".join(lines)
+
+
 def explain(onto: Ontology, topic: str | None) -> str:
     if not topic:
         return _overview(onto)

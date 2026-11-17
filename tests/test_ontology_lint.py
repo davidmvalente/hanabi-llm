@@ -16,7 +16,7 @@ from rdflib import RDF, RDFS, Graph, Literal, URIRef
 import hanabi_llm.engine  # noqa: F401  (registers the bound functions)
 import hanabi_llm.tools  # noqa: F401
 from hanabi_llm.engine import Game
-from hanabi_llm.ontology import HN, load_ontology
+from hanabi_llm.ontology import HN, available_knowledge, load_ontology
 from hanabi_llm.players import RandomPlayer
 from hanabi_llm.registry import FUNCTIONS
 from hanabi_llm.runner import play_game
@@ -31,9 +31,16 @@ def local(term: object) -> str:
     return str(term).removeprefix(HN_NS)
 
 
+@pytest.fixture(scope="module", params=[(), ("mdk",)], ids=["baseline", "with-mdk"])
+def onto(request: pytest.FixtureRequest) -> Graph:
+    """The ontology as a game sees it: the baseline, and with each optional knowledge graph loaded."""
+    return load_ontology(request.param).graph
+
+
 @pytest.fixture(scope="module")
-def onto() -> Graph:
-    return load_ontology().graph
+def everything() -> Graph:
+    """The core plus every knowledge graph: every term any part of the code may reference."""
+    return load_ontology(available_knowledge()).graph
 
 
 @pytest.fixture(scope="module")
@@ -79,10 +86,10 @@ def test_every_type_used_is_declared(onto: Graph) -> None:
     assert {local(t) for t in used - declared(onto, RDFS.Class)} == set()
 
 
-def test_every_term_the_code_references_is_declared(onto: Graph) -> None:
+def test_every_term_the_code_references_is_declared(everything: Graph) -> None:
     """``HN.Something`` in the source must exist in the ontology (this is the hn:Game bug)."""
     referenced = {m for f in SRC.glob("*.py") for m in re.findall(r"\bHN\.([A-Za-z]+)\b", f.read_text())}
-    known = {local(s) for s in hn_individuals(onto)}
+    known = {local(s) for s in hn_individuals(everything)}
     assert referenced - known == set()
 
 
@@ -146,7 +153,7 @@ def test_no_dead_vocabulary(onto: Graph, game_graphs: Graph) -> None:
 
 
 def test_every_bound_function_is_named_in_the_ontology_and_vice_versa() -> None:
-    assert set(FUNCTIONS) == load_ontology().referenced_functions()
+    assert set(FUNCTIONS) == load_ontology(available_knowledge()).referenced_functions()
 
 
 def test_measured_by_points_at_declared_terms(onto: Graph) -> None:
@@ -164,3 +171,9 @@ def test_documentation_is_complete(onto: Graph) -> None:
     for param in declared(onto, HN.Parameter):
         for p in (HN.paramName, HN.paramType, HN.paramDescription):
             assert str(onto.value(param, p) or "").strip(), f"{local(param)} lacks {local(p)}"
+
+
+def test_every_concept_is_complete(onto: Graph) -> None:
+    for concept in declared(onto, HN.Concept):
+        for p in (HN.conceptName, HN.category, HN.summary, HN.guidance):
+            assert str(onto.value(concept, p) or "").strip(), f"{local(concept)} lacks {local(p)}"

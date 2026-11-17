@@ -130,6 +130,21 @@ The tool set is exactly three families, with no overlap and nothing missing:
   waits, and that nothing external is requested; a headless-browser run checks the blinding and
   the scrubbing.
 
+## Baseline readiness and knowledge arms
+
+* **Knowledge graphs are separate, optional files.** The strategy notes left the core ontology:
+  the baseline loads none, and a test proves no note text reaches a model's prompt, tool schemas
+  or any tool answer. A note shared an id with a rule (`hint_refund`); renamed, and a test now
+  forbids any collision between note, rule and action names.
+* **The pipeline is tested over real HTTP** (`tests/test_e2e_http.py`): the CLI against a local
+  OpenAI-compatible server, three LLM seats playing a whole game through tool calls, the request
+  headers and bodies, the feed and trace, and the other two outcomes: a provider outage (an
+  infrastructure fault, nobody blamed) and a model that never calls a tool (that seat's fault).
+* **Event wording** was hard to read and lost information when copied (`discarded position 1: 1`,
+  `T7Alice`, "rank 3 ... position 3", a bare draw on its own line). It is now defined once in
+  `narrate.py`; cards always carry their colour in the text, hints read "position 3 is green", and
+  the viewer joins a draw to the action it followed.
+
 ## v1.1 plan: token parsimony and caching
 
 **Is the conversation cached?** Partly, and not as a "thread". Each API call is

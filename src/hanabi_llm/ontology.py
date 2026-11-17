@@ -8,6 +8,7 @@ function that the engine has not implemented.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import resources
@@ -119,9 +120,10 @@ class Ontology:
     graph: Graph
     rules: RuleSet
     affordances: dict[str, AffordanceSpec]  # keyed by function_name
-    concepts: dict[str, Concept]  # keyed by concept name
+    concepts: dict[str, Concept]  # keyed by concept name; empty unless a knowledge graph is loaded
     rule_docs: dict[str, RuleDoc]  # keyed by rule name
     regime: Regime
+    knowledge: tuple[str, ...] = ()  # the knowledge graphs that were loaded (empty = the baseline)
 
     def referenced_functions(self) -> set[str]:
         """Every Python function name the ontology expects to exist."""
@@ -274,29 +276,45 @@ def _load_regime(g: Graph) -> Regime:
     return regime
 
 
-_CATEGORIES = {HN.Mechanic: "mechanic", HN.Dynamic: "dynamic", HN.Kinetic: "kinetic"}
-
-
 def _load_concepts(g: Graph) -> dict[str, Concept]:
     concepts: dict[str, Concept] = {}
-    for class_iri, category in _CATEGORIES.items():
-        for node in g.subjects(RDF.type, class_iri):
-            name = _str(g, node, HN.conceptName)
-            concepts[name] = Concept(
-                name=name,
-                category=category,
-                summary=_str(g, node, HN.summary),
-                guidance=_str(g, node, HN.guidance),
-            )
+    for node in g.subjects(RDF.type, HN.Concept):
+        name = _str(g, node, HN.conceptName)
+        if name in concepts:
+            raise ValueError(f"knowledge: two concepts are named {name!r}")
+        concepts[name] = Concept(
+            name=name,
+            category=_str(g, node, HN.category),
+            summary=_str(g, node, HN.summary),
+            guidance=_str(g, node, HN.guidance),
+        )
     return concepts
 
 
-def load_ontology() -> Ontology:
-    """Parse the bundled Turtle file."""
+def available_knowledge() -> list[str]:
+    """Names of the optional knowledge graphs shipped in ``knowledge/`` (files starting with ``_`` are infrastructure)."""
+    names = (p.name for p in resources.files("hanabi_llm").joinpath("knowledge").iterdir())
+    return sorted(n.removesuffix(".ttl") for n in names if n.endswith(".ttl") and not n.startswith("_"))
+
+
+def load_ontology(knowledge: Sequence[str] = ()) -> Ontology:
+    """Parse the core ontology, plus any selected knowledge graphs.
+
+    With no ``knowledge`` this is the baseline: the ontology contains no
+    strategy notes and offers no ``get_concepts`` tool.
+    """
+    pkg = resources.files("hanabi_llm")
     g = Graph()
     g.bind("hn", HN)
-    text = resources.files("hanabi_llm").joinpath("hanabi.ttl").read_text("utf-8")
-    g.parse(data=text, format="turtle")
+    g.parse(data=pkg.joinpath("hanabi.ttl").read_text("utf-8"), format="turtle")
+    chosen = tuple(dict.fromkeys(knowledge))  # no duplicates, order kept
+    if chosen:
+        unknown = [k for k in chosen if k not in available_knowledge()]
+        if unknown:
+            raise ValueError(f"unknown knowledge graph(s) {unknown}; available: {available_knowledge()}")
+        g.parse(data=pkg.joinpath("knowledge", "_concepts.ttl").read_text("utf-8"), format="turtle")
+        for name in chosen:
+            g.parse(data=pkg.joinpath("knowledge", f"{name}.ttl").read_text("utf-8"), format="turtle")
     return Ontology(
         graph=g,
         rules=_load_rules(g),
@@ -304,6 +322,7 @@ def load_ontology() -> Ontology:
         concepts=_load_concepts(g),
         rule_docs=_load_rule_docs(g),
         regime=_load_regime(g),
+        knowledge=chosen,
     )
 
 

@@ -26,7 +26,8 @@ import httpx
 from .engine import Game
 from .faults import GameStatus
 from .feed import FeedWriter, action_record, event_record, header_record, result_record
-from .llm import OpenRouterClient
+from .llm import OPENROUTER_URL, OpenRouterClient
+from .ontology import available_knowledge, load_ontology
 from .players import LLMPlayer, Player, RandomPlayer
 from .prompt import load_prompt
 from .runner import GameResult, TurnTrace, play_game
@@ -45,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--trace", type=Path, default=None, help="write the model conversations (JSONL) here")
     ap.add_argument("--max-calls", type=int, default=8, help="model calls allowed per turn")
     ap.add_argument("--max-failed-actions", type=int, default=3, help="rejected actions per turn before a model fault")
+    ap.add_argument("--knowledge", default="", help=f"comma-separated knowledge graphs to offer ({', '.join(available_knowledge())}); default: none, the baseline")
+    ap.add_argument("--api-url", default=OPENROUTER_URL, help="chat-completions endpoint (OpenRouter by default; any OpenAI-compatible server works)")
     ap.add_argument("--prompt", default=None, help="system prompt version, e.g. v1 (default: latest)")
     ap.add_argument("--audit", action="store_true", help="SHACL-validate the truth and every view after each turn (slow; needs pyshacl)")
     ap.add_argument("--temperature", type=float, default=0.3)
@@ -63,14 +66,15 @@ async def run(args: argparse.Namespace) -> GameResult:
 
     seed = args.seed if args.seed is not None else secrets.randbelow(2**31)
     names = list(SEAT_NAMES[: len(models)])
-    game = Game(names, seed=seed)
+    onto = load_ontology([k.strip() for k in args.knowledge.split(",") if k.strip()])
+    game = Game(names, seed=seed, ontology=onto)
     prompt = load_prompt(args.prompt)
     feed = FeedWriter(args.log) if args.log else None
     trace = FeedWriter(args.trace) if args.trace else None
 
     config = {
         "temperature": args.temperature, "max_tokens": args.max_tokens, "max_calls": args.max_calls,
-        "max_failed_actions": args.max_failed_actions, "prompt": {"version": prompt.version, "sha256": prompt.sha256},
+        "max_failed_actions": args.max_failed_actions, "knowledge": list(onto.knowledge), "prompt": {"version": prompt.version, "sha256": prompt.sha256},
     }
     if feed:  # the header carries the initial deal, so it is written before anything is played
         feed.write(header_record(game, dict(zip(names, models, strict=True)), config))
@@ -99,7 +103,7 @@ async def run(args: argparse.Namespace) -> GameResult:
                 if model == "random":
                     players.append(RandomPlayer(name, seed=seed + seat))
                 else:
-                    client = OpenRouterClient(model, api_key, http, temperature=args.temperature, max_tokens=args.max_tokens)
+                    client = OpenRouterClient(model, api_key, http, temperature=args.temperature, max_tokens=args.max_tokens, url=args.api_url)
                     players.append(LLMPlayer(name, client, game, seat, prompt=prompt, max_calls=args.max_calls,
                                              max_failed_actions=args.max_failed_actions))
             result = await play_game(game, players, on_turn=on_turn, turn_timeout=args.turn_timeout)

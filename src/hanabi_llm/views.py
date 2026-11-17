@@ -41,6 +41,8 @@ from .model import (
     PlayEvent,
     Seat,
 )
+from .feed import event_record
+from .narrate import segments, to_text
 from .ontology import HN, Regime
 
 
@@ -319,21 +321,5 @@ def describe_event(ev: Event, view: PlayerView) -> str:
 
 
 def narrate_event(ev: Event, names: Sequence[str], you: Seat | None = None) -> str:
-    """One event as a line of text. The single source of wording for the prompt, the CLI and the viewer."""
-
-    def who(seat: Seat) -> str:
-        return f"{names[seat]} (you)" if seat == you else names[seat]
-
-    if isinstance(ev, HintEvent):
-        what = ev.value.value if isinstance(ev.value, Color) else f"rank {ev.value}"
-        slots = ", ".join(str(p) for p in ev.targets)
-        return f"T{ev.turn} {who(ev.actor)} hinted {who(ev.receiver)}: {what} cards are at positions [{slots}]; the rest are not"
-    if isinstance(ev, PlayEvent):
-        outcome = "SUCCESS" if ev.success else "MISFIRE (fuse lost)"
-        return f"T{ev.turn} {who(ev.actor)} played position {ev.position}: {ev.card} -> {outcome}"
-    if isinstance(ev, DiscardEvent):
-        return f"T{ev.turn} {who(ev.actor)} discarded position {ev.position}: {ev.card}"
-    if isinstance(ev, DrawEvent):
-        card = "a new card" if ev.card.rank == 0 else f"{ev.card}"
-        return f"T{ev.turn} {who(ev.actor)} drew {card} into position (last slot)"
-    return f"T{ev.turn} GAME OVER: {ev.reason}. Score {ev.score}."
+    """One event as a line of text (the wording lives in ``narrate.py``)."""
+    return to_text(segments(event_record(ev)), names, you)
