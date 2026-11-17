@@ -13,6 +13,12 @@ Both are tested on whole games (tests/test_fold.py). The web viewer is served
 the folded states of this module, so it contains no game logic of its own.
 
 A card whose identity is hidden has ``color`` and ``rank`` of ``None``.
+
+This is also the engine's own state machine: ``Game.apply`` decides what
+happens (validates, resolves a play, draws from the secret deck), turns that
+into events, and applies them with ``step``. There is no second copy of what a
+hint, a play, a discard or a draw does to the state. The rule functions the
+ontology binds by name (refund, playable, game over, final round) live here too.
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .feed import Record
+from .registry import bind
 
 
 @dataclass(slots=True)
@@ -57,6 +64,15 @@ class FoldState:
     final_turns_left: int | None = None
     over_reason: str | None = None
     last_actor: int = 0
+    #: Cards placed on the fireworks, in play order (the truth must account for all of them).
+    played: list[dict[str, Any]] = field(default_factory=list)
+
+    @classmethod
+    def dealt(cls, names: list[str], colors: list[str], top_rank: int, max_hints: int, initial_hints: int, fuses: int,
+              hands: list[list[FoldCard]], deck_size: int) -> FoldState:
+        """The state right after the deal."""
+        return cls(names=names, colors=colors, top_rank=top_rank, max_hints=max_hints, max_fuses=fuses, hands=hands,
+                   stacks={c: 0 for c in colors}, discard=[], hints=initial_hints, fuses=fuses, deck_size=deck_size)
 
     @property
     def score(self) -> int:
@@ -76,17 +92,44 @@ class FoldState:
 
 def initial_state(header: Record) -> FoldState:
     rules = header["rules"]
-    return FoldState(
-        names=list(header["names"]), colors=list(rules["colors"]), top_rank=rules["top_rank"],
-        max_hints=rules["max_hints"], max_fuses=rules["fuses"],
+    return FoldState.dealt(
+        names=list(header["names"]), colors=list(rules["colors"]), top_rank=rules["top_rank"], max_hints=rules["max_hints"],
+        initial_hints=rules["initial_hints"], fuses=rules["fuses"],
         hands=[[FoldCard(c["uid"], c["color"], c["rank"]) for c in hand] for hand in header["deal"]["hands"]],
-        stacks={c: 0 for c in rules["colors"]}, discard=[], hints=rules["initial_hints"], fuses=rules["fuses"],
         deck_size=header["deal"]["deck_size"],
     )
 
 
-def _gain_hint(s: FoldState) -> None:
+# --- the rules the ontology binds by name ------------------------------------------------------------------
+
+
+@bind("refund_hint")
+def refund_hint(s: FoldState) -> None:
+    """Discarding, or completing a stack with its top rank, returns a hint token (never above the maximum)."""
     s.hints = min(s.max_hints, s.hints + 1)
+
+
+@bind("play_is_legal_or_misfire")
+def is_playable(s: FoldState, color: str, rank: int) -> bool:
+    """A card is placed if it is the next one its colour needs; otherwise it is a misfire."""
+    return s.stacks[color] == rank - 1
+
+
+@bind("final_round_done")
+def final_round_done(s: FoldState) -> bool:
+    return s.final_turns_left == 0
+
+
+@bind("game_is_over")
+def game_is_over(s: FoldState) -> str | None:
+    """The reason the game has ended, or ``None`` if it continues."""
+    if s.fuses <= 0:
+        return "all fuse tokens were used up"
+    if all(h == s.top_rank for h in s.stacks.values()):
+        return "all fireworks are complete"
+    if final_round_done(s):
+        return "the final round after the deck ran out is over"
+    return None
 
 
 def _begin_action(s: FoldState, rec: Record) -> None:
@@ -125,15 +168,16 @@ def step(s: FoldState, rec: Record) -> None:
             raise ValueError(f"feed inconsistent: position {rec['position']} held card {gone.uid}, event says {rec['card']['uid']}")
         card = rec["card"]  # a played or discarded card is revealed to everyone
         if kind == "play" and rec["success"]:
+            s.played.append(card)
             s.stacks[card["color"]] = card["rank"]
             if card["rank"] == s.top_rank:
-                _gain_hint(s)
+                refund_hint(s)
         else:
             s.discard.append(card)
             if kind == "play":
                 s.fuses -= 1
             else:
-                _gain_hint(s)
+                refund_hint(s)
     elif kind == "draw":
         c = rec["card"]
         s.hands[rec["actor"]].append(FoldCard(c["uid"], c["color"], c["rank"]))

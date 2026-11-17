@@ -96,11 +96,8 @@ graph(o, t) = graph_of(view(o, t))                   a read model, rebuilt on de
   an RDF store authoritative, with `step` expressed as triples added and removed; the same fold,
   but the rules would live in SPARQL or SHACL rather than typed Python. B keeps the engine and
   can still produce the graph when needed (`validate.py`).
-* **Not yet unified**: the engine still mutates its own state and `fold.step` re-implements the
-  same transitions from events, so there are two copies of the rules. The whole-game tests make
-  any drift visible. Making the engine fold its own events would leave one.
-
-## What is still open
-
-Whether the engine should fold its own events, so that the log is not only sufficient but the
-single source (see "Not yet unified" above). Nothing else here depends on it.
+* **Unified**: the engine decides and `fold.step` applies. The engine validates an action, decides
+  what happens (a play's outcome, the cards a hint covers, the draw from the secret deck), turns
+  that into events and folds them; it never writes the state itself, and a test guards that. The
+  state the views and the SHACL truth graph read is a read-only snapshot of the fold, so the
+  fold that rebuilds states from the feed is the same code that runs the game.

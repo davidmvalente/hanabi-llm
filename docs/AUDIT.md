@@ -145,6 +145,22 @@ The tool set is exactly three families, with no overlap and nothing missing:
   `narrate.py`; cards always carry their colour in the text, hints read "position 3 is green", and
   the viewer joins a draw to the action it followed.
 
+## The engine decides, the fold applies
+
+* **Two copies of the rules became one.** The engine used to change its own state and emit events,
+  while `fold.step` re-derived the same state from the events. Now `Game.apply` validates, decides
+  and builds events, and `fold.step` is the only code that applies them; the rules the ontology
+  binds by name (refund, playable, game over, final round) live there. The registry refused a
+  second binding of the same name, which is how the old duplication showed up.
+* **The state is a read-only snapshot** (tuples, read-only mappings, immutable card knowledge), so
+  misuse raises instead of silently diverging. Setting up a position goes through `Game.rig`.
+* **Guards:** breaking the fold's refund rule changes the engine's behaviour; a static test fails if
+  the engine ever writes hints, fuses, stacks, turn, discard or hands itself; planting such a write
+  fails the behaviour tests and the guard. 188 tests, including the whole-game fold-versus-truth
+  tests, passed unchanged in meaning through the refactor.
+* **Scripts** (`scripts/`): a heuristic demo bot and the headless-browser check are now in the repo,
+  so the viewer verification can be reproduced.
+
 ## v1.1 plan: token parsimony and caching
 
 **Is the conversation cached?** Partly, and not as a "thread". Each API call is

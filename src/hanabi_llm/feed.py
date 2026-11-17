@@ -23,11 +23,11 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
-from .engine import Game
 from .model import Action, Card, Color, DiscardEvent, DrawEvent, EndEvent, Event, GiveHint, HintEvent, PlayEvent
 from .ontology import Regime
 
 if TYPE_CHECKING:
+    from .engine import Game
     from .runner import GameResult
 
 SCHEMA = 1

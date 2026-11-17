@@ -80,7 +80,7 @@ def test_final_round_and_game_over_appear_in_turn(game2: Game) -> None:
 
 
 def test_fireworks_show_what_is_needed_next(game2: Game) -> None:
-    game2.state.stacks[R], game2.state.stacks[G] = 2, 5
+    game2.rig(stacks={R: 2, G: 5})
     out = text(game2, 0, "fireworks")
     assert "red: 2, next needed: red 3" in out and "green: 5, complete" in out and "Score 7/25." in out
 

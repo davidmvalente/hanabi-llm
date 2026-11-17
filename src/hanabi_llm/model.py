@@ -6,7 +6,7 @@ describes the same concepts declaratively; ``views.py`` is the bridge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar
 
@@ -36,18 +36,19 @@ class Card:
         return f"{self.color.value} {self.rank}"
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class CardKnowledge:
     """What is *publicly known* about one card, purely from hints given.
 
     Every player can compute this for every card, so it is common knowledge
-    and safe to show to anyone (including the card's holder).
+    and safe to show to anyone (including the card's holder). It is derived
+    from the fold, so it is immutable here.
     """
 
     color: Color | None = None
     rank: int | None = None
-    not_colors: set[Color] = field(default_factory=set)
-    not_ranks: set[int] = field(default_factory=set)
+    not_colors: frozenset[Color] = frozenset()
+    not_ranks: frozenset[int] = frozenset()
 
 
 # ---------------------------------------------------------------------------

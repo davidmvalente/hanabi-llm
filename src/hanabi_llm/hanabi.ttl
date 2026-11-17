@@ -270,7 +270,7 @@ hn:AffPlayCard a hn:Affordance ;
     hn:description "ACTION (ends your turn). Play a card from your own hand. If it is the next card of its colour's firework it is placed; otherwise it is discarded and a fuse token is spent. You cannot see your own cards." ;
     hn:requires hn:RuleCardInHand ;
     hn:appliesRule hn:RuleMisfireCostsFuse, hn:RuleHintRefund ;
-    hn:effectFunction "apply_play_card" ;
+    hn:effectFunction "decide_play_card" ;
     hn:hasParameter hn:ParamPlayPosition .
 
 hn:AffDiscardCard a hn:Affordance ;
@@ -279,7 +279,7 @@ hn:AffDiscardCard a hn:Affordance ;
     hn:description "ACTION (ends your turn). Discard one card from your own hand to the public discard pile. Gives back one hint token if any is spent." ;
     hn:requires hn:RuleCardInHand ;
     hn:appliesRule hn:RuleHintRefund ;
-    hn:effectFunction "apply_discard_card" ;
+    hn:effectFunction "decide_discard_card" ;
     hn:hasParameter hn:ParamDiscardPosition .
 
 hn:AffGiveHint a hn:Affordance ;
@@ -288,7 +288,7 @@ hn:AffGiveHint a hn:Affordance ;
     hn:description "ACTION (ends your turn). Spend one hint token to tell another player which cards of their hand have one colour OR one rank. The hint targets EVERY card of theirs with that colour or rank, so it also tells them that all their other cards do not." ;
     hn:requires hn:RuleHintTokenAvailable, hn:RuleHintReceiverIsOther, hn:RuleHintTargetsCards, hn:RuleHintExactlyOneAttribute ;
     hn:appliesRule hn:RuleHintIsComplete ;
-    hn:effectFunction "apply_give_hint" ;
+    hn:effectFunction "decide_give_hint" ;
     hn:hasParameter hn:ParamHintReceiver, hn:ParamHintValue .
 
 hn:ParamPlayPosition a hn:Parameter ;

@@ -7,7 +7,7 @@ from rdflib import RDF, Graph
 
 from conftest import R, rig
 from hanabi_llm.engine import Game
-from hanabi_llm.model import Color, DiscardCard, GiveHint, PlayCard
+from hanabi_llm.model import CardKnowledge, Color, DiscardCard, GiveHint, PlayCard
 from hanabi_llm.ontology import HN
 from hanabi_llm.players import RandomPlayer
 from hanabi_llm.runner import play_game
@@ -77,21 +77,23 @@ def test_truth_rejects_a_card_with_two_colours(g3: Game) -> None:
 
 def test_truth_rejects_a_duplicated_card() -> None:
     game = Game(["Alice", "Bob"], seed=1)
-    game.state.deck[0] = game.state.deck[1]
+    deck = list(game.state.deck)
+    deck[0] = deck[1]
+    game.rig(deck=deck)
     with pytest.raises(AuditError, match="copies per colour"):
         check_truth(truth_graph(game))
 
 
 def test_truth_rejects_a_stack_taller_than_its_cards() -> None:
     game = Game(["Alice", "Bob"], seed=1)
-    game.state.stacks[Color.RED] = 2
+    game.rig(stacks={Color.RED: 2})
     with pytest.raises(AuditError, match="missing a rank"):
         check_truth(truth_graph(game))
 
 
 def test_truth_rejects_tokens_beyond_capacity() -> None:
     game = Game(["Alice", "Bob"], seed=1)
-    game.state.hints = 9
+    game.rig(hints=9)
     with pytest.raises(AuditError, match="0 <= available <= capacity"):
         check_truth(truth_graph(game))
 
@@ -99,7 +101,7 @@ def test_truth_rejects_tokens_beyond_capacity() -> None:
 def test_truth_rejects_a_hint_that_lies() -> None:
     game = Game(["Alice", "Bob"], seed=1)
     card = game.state.hands[1][0]
-    game.state.knowledge[card.uid].color = Color.BLUE if card.color is not Color.BLUE else Color.RED
+    game.rig(knowledge={card.uid: CardKnowledge(color=Color.BLUE if card.color is not Color.BLUE else Color.RED)})
     with pytest.raises(AuditError, match="hint told the holder"):
         check_truth(truth_graph(game))
 

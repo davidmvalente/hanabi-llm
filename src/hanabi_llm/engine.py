@@ -1,22 +1,34 @@
 """Authoritative game engine.
 
-Responsibilities:
-  * hold the one true game state (including every hidden card),
-  * enumerate legal actions,
-  * enforce rules by running the precondition functions *named by the
-    ontology* for the chosen affordance, then its named effect function,
-  * produce an immutable event log.
+The engine DECIDES; the fold APPLIES. ``Game.apply`` validates an action with the
+precondition functions the ontology names, decides what happens (resolves a
+play, draws from the secret deck, works out which cards a hint covers), turns
+that into events, and applies them with ``fold.step``. There is exactly one
+implementation of what a hint, a play, a discard or a draw does to the state
+(``fold.py``), shared with the feed, the viewer and the tests.
 
-The engine knows nothing about LLMs or RDF views. It trusts nobody: any
-action, from any source, goes through ``Game.apply``.
+What lives here and nowhere else:
+  * the secret deck and its order (it is outside the fold: nobody may see it),
+  * validation of actions, and the legal-action list,
+  * the decisions (``decide_*``): a play succeeds if the card is the next one
+    its colour needs; a hint covers every card of the hand with that value.
+
+``game.state`` is a read-only typed snapshot of the fold, rebuilt after every
+action. It cannot be mutated (tuples and read-only mappings), so a mistake
+raises instead of silently diverging from the truth. To set up a scenario use
+``Game.rig``.
 """
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import cast
 
+from .feed import event_record
+from .fold import FoldCard, FoldState, is_playable, step
 from .model import (
     Action,
     Card,
@@ -39,26 +51,27 @@ from .ontology import AffordanceSpec, Ontology, RuleSet, load_ontology, verify_b
 from .registry import FUNCTIONS, bind
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class GameState:
-    """Everything about a game, hidden information included."""
+    """A read-only snapshot of everything about a game, hidden information included."""
 
     names: list[str]
-    hands: list[list[Card]]
-    deck: list[Card]
-    discard: list[Card]
-    stacks: dict[Color, int]
+    hands: tuple[tuple[Card, ...], ...]
+    deck: tuple[Card, ...]  # the top of the deck is the last element
+    discard: tuple[Card, ...]
+    stacks: Mapping[Color, int]
     hints: int
     fuses: int
-    current: Seat = 0
-    turn: int = 1
+    current: Seat
+    turn: int
     #: ``None`` until the deck runs out, then counts down remaining turns.
-    final_turns_left: int | None = None
-    #: Cards placed on the fireworks, in play order. Kept so the ground truth accounts for every card.
-    played: list[Card] = field(default_factory=list)
-    knowledge: dict[int, CardKnowledge] = field(default_factory=dict)
-    events: list[Event] = field(default_factory=list)
-    over_reason: str | None = None
+    final_turns_left: int | None
+    #: Cards placed on the fireworks, in play order.
+    played: tuple[Card, ...]
+    #: What hints have told the holder about each card still in a hand.
+    knowledge: Mapping[int, CardKnowledge]
+    events: tuple[Event, ...]
+    over_reason: str | None
 
     @property
     def score(self) -> int:
@@ -69,6 +82,13 @@ class GameState:
     def lost(self) -> bool:
         """True if the team blew all its fuses (official score is then 0)."""
         return self.over_reason == "all fuse tokens were used up"
+
+
+def hint_targets(hand: Sequence[Card | FoldCard], value: HintValue) -> tuple[int, ...]:
+    """The positions a hint of ``value`` covers: EVERY card of the hand with that colour or rank."""
+    if isinstance(value, Color):
+        return tuple(i for i, c in enumerate(hand) if c.color == value)
+    return tuple(i for i, c in enumerate(hand) if c.rank == value)
 
 
 # ---------------------------------------------------------------------------
@@ -119,13 +139,6 @@ def _hint_token_available(state: GameState, rules: RuleSet, actor: Seat, action:
         raise IllegalAction("No hint tokens left. Play or discard a card instead; discarding returns a hint token.")
 
 
-def hint_targets(hand: list[Card], value: HintValue) -> tuple[int, ...]:
-    """The positions a hint of ``value`` covers: EVERY card of the hand with that colour or rank."""
-    if isinstance(value, Color):
-        return tuple(i for i, c in enumerate(hand) if c.color == value)
-    return tuple(i for i, c in enumerate(hand) if c.rank == value)
-
-
 @bind("hint_targets_cards")
 def _hint_targets_cards(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> None:
     if not isinstance(action, GiveHint):
@@ -139,104 +152,44 @@ def _hint_targets_cards(state: GameState, rules: RuleSet, actor: Seat, action: A
 
 
 # ---------------------------------------------------------------------------
-# Predicates and shared effects used by several affordances.
+# Decisions. Signature: (game, actor, action) -> list[Event].
+# They only DECIDE and build events (drawing from the secret deck is the one
+# thing they do); ``Game.apply`` applies the events with ``fold.step``.
 # ---------------------------------------------------------------------------
 
 
-@bind("play_is_legal_or_misfire")
-def is_playable(state: GameState, card: Card) -> bool:
-    """True if ``card`` is the next one needed on its colour's stack."""
-    return state.stacks[card.color] == card.rank - 1
+def _card(fc: FoldCard) -> Card:
+    assert fc.color is not None and fc.rank is not None, "the engine's own state always knows every identity"
+    return Card(fc.uid, Color(fc.color), fc.rank)
 
 
-@bind("refund_hint")
-def _refund_hint(state: GameState, rules: RuleSet) -> None:
-    state.hints = min(rules.max_hints, state.hints + 1)
+def _draw_event(game: Game, actor: Seat, turn: int) -> list[Event]:
+    """A refill for the actor's hand, if the deck has a card; new cards always go into the LAST slot."""
+    return [DrawEvent(turn, actor, game._deck.pop())] if game._deck else []
 
 
-@bind("final_round_done")
-def _final_round_done(state: GameState) -> bool:
-    return state.final_turns_left == 0
-
-
-@bind("game_is_over")
-def _game_is_over(state: GameState, rules: RuleSet) -> str | None:
-    """Return the reason the game ended, or ``None`` if it continues."""
-    if state.fuses <= 0:
-        return "all fuse tokens were used up"
-    if all(h == rules.top_rank for h in state.stacks.values()):
-        return "all fireworks are complete"
-    if _final_round_done(state):
-        return "the final round after the deck ran out is over"
-    return None
-
-
-def _draw(state: GameState, actor: Seat) -> DrawEvent | None:
-    """Refill the actor's hand. New cards always go into the *last* slot."""
-    if not state.deck:
-        return None
-    card = state.deck.pop()
-    state.hands[actor].append(card)
-    state.knowledge[card.uid] = CardKnowledge()
-    return DrawEvent(state.turn, actor, card)
-
-
-# ---------------------------------------------------------------------------
-# Effects. Signature: (state, rules, actor, action) -> list[Event].
-# Effects mutate state but do NOT append to state.events; Game.apply does.
-# ---------------------------------------------------------------------------
-
-
-@bind("apply_play_card")
-def _apply_play_card(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> list[Event]:
+@bind("decide_play_card")
+def _decide_play_card(game: Game, actor: Seat, action: Action) -> list[Event]:
     assert isinstance(action, PlayCard)
-    card = state.hands[actor].pop(action.position)
-    success = is_playable(state, card)
-    if success:
-        state.stacks[card.color] += 1
-        state.played.append(card)
-        if card.rank == rules.top_rank:
-            FUNCTIONS["refund_hint"](state, rules)
-    else:
-        state.discard.append(card)
-        state.fuses -= 1
-    events: list[Event] = [PlayEvent(state.turn, actor, action.position, card, success)]
-    if (draw := _draw(state, actor)) is not None:
-        events.append(draw)
-    return events
+    fold = game._fold
+    card = _card(fold.hands[actor][action.position])
+    success = is_playable(fold, card.color, card.rank)  # the rule "play_is_legal_or_misfire"
+    return [PlayEvent(fold.turn, actor, action.position, card, success), *_draw_event(game, actor, fold.turn)]
 
 
-@bind("apply_discard_card")
-def _apply_discard_card(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> list[Event]:
+@bind("decide_discard_card")
+def _decide_discard_card(game: Game, actor: Seat, action: Action) -> list[Event]:
     assert isinstance(action, DiscardCard)
-    card = state.hands[actor].pop(action.position)
-    state.discard.append(card)
-    FUNCTIONS["refund_hint"](state, rules)
-    events: list[Event] = [DiscardEvent(state.turn, actor, action.position, card)]
-    if (draw := _draw(state, actor)) is not None:
-        events.append(draw)
-    return events
+    fold = game._fold
+    card = _card(fold.hands[actor][action.position])
+    return [DiscardEvent(fold.turn, actor, action.position, card), *_draw_event(game, actor, fold.turn)]
 
 
-@bind("apply_give_hint")
-def _apply_give_hint(state: GameState, rules: RuleSet, actor: Seat, action: Action) -> list[Event]:
+@bind("decide_give_hint")
+def _decide_give_hint(game: Game, actor: Seat, action: Action) -> list[Event]:
     assert isinstance(action, GiveHint)
-    state.hints -= 1
-    hand = state.hands[action.receiver]
-    targets = hint_targets(hand, action.value)
-    value = action.value
-    for position, card in enumerate(hand):
-        know = state.knowledge[card.uid]
-        if position in targets:  # the cards the hint covers ARE this colour / rank ...
-            if isinstance(value, Color):
-                know.color = value
-            else:
-                know.rank = value
-        elif isinstance(value, Color):  # ... and, because a hint is complete, every other card is NOT
-            know.not_colors.add(value)
-        else:
-            know.not_ranks.add(value)
-    return [HintEvent(state.turn, actor, action.receiver, value, targets)]
+    targets = hint_targets(game._fold.hands[action.receiver], action.value)  # complete: every matching card
+    return [HintEvent(game._fold.turn, actor, action.receiver, action.value, targets)]
 
 
 # ---------------------------------------------------------------------------
@@ -277,16 +230,16 @@ class Game:
 
         hand_size = rules.hand_size_by_players[n]
         hands = [[deck.pop() for _ in range(hand_size)] for _ in range(n)]
-        self.state = GameState(
-            names=list(player_names),
-            hands=hands,
-            deck=deck,
-            discard=[],
-            stacks={c: 0 for c in rules.colors},
-            hints=rules.initial_hints,
-            fuses=rules.initial_fuses,
+        #: The secret: the cards still to be drawn. Not part of the fold, so no view can ever contain it.
+        self._deck: list[Card] = deck
+        #: The truth: the one place the game state lives, changed only by ``fold.step``.
+        self._fold = FoldState.dealt(
+            names=list(player_names), colors=[c.value for c in rules.colors], top_rank=rules.top_rank,
+            max_hints=rules.max_hints, initial_hints=rules.initial_hints, fuses=rules.initial_fuses,
+            hands=[[FoldCard(c.uid, c.color.value, c.rank) for c in hand] for hand in hands], deck_size=len(deck),
         )
-        self.state.knowledge = {c.uid: CardKnowledge() for hand in hands for c in hand}
+        self._events: list[Event] = []
+        self._snapshot: GameState | None = None
 
     @property
     def rules(self) -> RuleSet:
@@ -294,7 +247,67 @@ class Game:
 
     @property
     def is_over(self) -> bool:
-        return self.state.over_reason is not None
+        return self._fold.over_reason is not None
+
+    @property
+    def state(self) -> GameState:
+        """A read-only typed snapshot of the truth (rebuilt only after the game changes)."""
+        if self._snapshot is None:
+            f = self._fold
+            self._snapshot = GameState(
+                names=list(f.names),
+                hands=tuple(tuple(_card(c) for c in hand) for hand in f.hands),
+                deck=tuple(self._deck),
+                discard=tuple(Card(c["uid"], Color(c["color"]), c["rank"]) for c in f.discard),
+                stacks=MappingProxyType({Color(c): h for c, h in f.stacks.items()}),
+                hints=f.hints, fuses=f.fuses, current=f.current, turn=f.turn, final_turns_left=f.final_turns_left,
+                played=tuple(Card(c["uid"], Color(c["color"]), c["rank"]) for c in f.played),
+                knowledge=MappingProxyType({
+                    c.uid: CardKnowledge(
+                        color=Color(c.known_color) if c.known_color else None, rank=c.known_rank,
+                        not_colors=frozenset(Color(x) for x in c.not_colors), not_ranks=frozenset(c.not_ranks))
+                    for hand in f.hands for c in hand}),
+                events=tuple(self._events), over_reason=f.over_reason,
+            )
+        return self._snapshot
+
+    # -- scenario setup -----------------------------------------------------
+
+    def rig(
+        self,
+        *,
+        hands: Sequence[Sequence[Card]] | None = None,
+        deck: Sequence[Card] | None = None,
+        stacks: Mapping[Color, int] | None = None,
+        hints: int | None = None,
+        fuses: int | None = None,
+        knowledge: Mapping[int, CardKnowledge] | None = None,
+    ) -> None:
+        """Set up a position directly, for tests and for putting a decision-maker on a fixed scenario.
+
+        This bypasses the rules, so it can create positions the rules never would (for
+        example hands that do not add up to a real deck); the SHACL audit rejects those.
+        The top of ``deck`` is its last element. ``knowledge`` is applied to cards in hands.
+        """
+        f = self._fold
+        if hands is not None:
+            f.hands = [[FoldCard(c.uid, c.color.value, c.rank) for c in hand] for hand in hands]
+        if deck is not None:
+            self._deck = list(deck)
+            f.deck_size = len(self._deck)
+        for color, height in (stacks or {}).items():
+            f.stacks[color.value] = height
+        if hints is not None:
+            f.hints = hints
+        if fuses is not None:
+            f.fuses = fuses
+        if knowledge:
+            held = {c.uid: c for hand in f.hands for c in hand}
+            for uid, k in knowledge.items():
+                c = held[uid]
+                c.known_color, c.known_rank = (k.color.value if k.color else None), k.rank
+                c.not_colors, c.not_ranks = [x.value for x in k.not_colors], list(k.not_ranks)
+        self._snapshot = None
 
     # -- legality -----------------------------------------------------------
 
@@ -336,32 +349,23 @@ class Game:
             FUNCTIONS[check](st, self.rules, actor, action)
         return spec
 
-    # -- the one entry point that mutates state -----------------------------
+    # -- the one entry point that changes the game --------------------------
 
     def apply(self, actor: Seat, action: Action) -> list[Event]:
-        """Validate and execute ``action``. Raises ``IllegalAction`` if illegal.
+        """Validate ``action``, decide what happens, and fold the events into the state.
 
-        On success returns the events produced (also appended to the log).
+        Raises ``IllegalAction`` if illegal. On success returns the events produced.
         """
-        st = self.state
         spec = self.check(actor, action)
-
-        was_final = st.final_turns_left is not None
-        events = cast(list[Event], FUNCTIONS[spec.effect_function](st, self.rules, actor, action))
-
-        # Deck-exhaustion clock: the turn that draws the last card starts a
-        # final round in which every player (that drawer included) acts once.
-        if was_final:
-            assert st.final_turns_left is not None
-            st.final_turns_left -= 1
-        elif not st.deck:
-            st.final_turns_left = len(st.names)
-
-        st.over_reason = FUNCTIONS["game_is_over"](st, self.rules)
-        if st.over_reason is not None:
-            events.append(EndEvent(st.turn, st.over_reason, st.score))
-        else:
-            st.current = (st.current + 1) % len(st.names)
-            st.turn += 1
-        st.events.extend(events)
+        events = cast(list[Event], FUNCTIONS[spec.effect_function](self, actor, action))
+        turn = events[0].turn
+        for ev in events:
+            step(self._fold, event_record(ev))  # the ONLY place the state changes
+        reason = FUNCTIONS["game_is_over"](self._fold)
+        if reason is not None:
+            end = EndEvent(turn, reason, self._fold.score)
+            events.append(end)
+            step(self._fold, event_record(end))
+        self._events.extend(events)
+        self._snapshot = None
         return events
