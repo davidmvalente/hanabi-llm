@@ -1,0 +1,45 @@
+# SHACL shapes for one player's VIEW graph (views.view_graph): the epistemic
+# regime declared in the ontology, enforced on the actual graph. These shapes
+# encode the standard regime (Hand: HiddenFromHolder, DiscardPile/Stack:
+# Public, Deck: HiddenFromAll); views.py refuses to load any other combination
+# except an open hand, which has its own unit test.
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix hn:  <https://example.org/hanabi#> .
+
+<https://example.org/hanabi/shapes/view> a owl:Ontology ;
+    sh:declare [ sh:prefix "hn" ; sh:namespace "https://example.org/hanabi#"^^xsd:anyURI ] .
+
+hn:ViewGameShape a sh:NodeShape ; sh:targetClass hn:Game ;
+    sh:property [ sh:path hn:viewer ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "A view graph names exactly one viewer." ] ;
+    # HiddenFromHolder: you never see the identity of a card you hold ...
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/view> ;
+        sh:message "LEAK: the viewer can see the identity of a card they hold." ;
+        sh:select """SELECT $this WHERE { $this hn:viewer ?me . ?c hn:heldBy ?me .
+                     { ?c hn:hasColor ?x } UNION { ?c hn:hasRank ?x } }""" ] ;
+    # ... but you do see everyone else's.
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/view> ;
+        sh:message "The viewer cannot see the identity of a card another player holds." ;
+        sh:select """SELECT $this WHERE { $this hn:viewer ?me . ?c hn:heldBy ?p . FILTER(?p != ?me)
+                     FILTER ( NOT EXISTS { ?c hn:hasColor ?x } || NOT EXISTS { ?c hn:hasRank ?y } ) }""" ] ;
+    # HiddenFromAll: the deck, and the order of its cards, never appear. A card node must be
+    # held, discarded, or the subject of a play or discard event (a played card is revealed).
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/view> ;
+        sh:message "LEAK: a card that is not in a hand, the discard pile or a played-card event appears in the view (deck)." ;
+        sh:select """SELECT $this WHERE { $this hn:viewer ?me . ?c a hn:Card .
+                     FILTER NOT EXISTS { ?c hn:heldBy ?p } FILTER NOT EXISTS { ?c hn:discarded true }
+                     FILTER NOT EXISTS { ?e hn:card ?c } }""" ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/view> ;
+        sh:message "LEAK: the view contains a deck zone." ;
+        sh:select """SELECT $this WHERE { $this hn:viewer ?me . ?z a hn:Deck }""" ] ;
+    # A drawn card is not revealed by the draw event.
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/view> ;
+        sh:message "LEAK: a draw event names the card that was drawn." ;
+        sh:select """SELECT $this WHERE { $this hn:viewer ?me . ?e a hn:DrawEvent ; hn:card ?c }""" ] .
+
+hn:ViewPoolShape a sh:NodeShape ; sh:targetClass hn:TokenState ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/view> ;
+        sh:message "A token pool must satisfy 0 <= available <= capacity and spent = capacity - available." ;
+        sh:select """SELECT $this WHERE { $this hn:available ?a ; hn:capacity ?c ; hn:spent ?s .
+                     FILTER(?a < 0 || ?a > ?c || ?s != ?c - ?a) }""" ] .

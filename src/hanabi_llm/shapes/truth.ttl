@@ -1,0 +1,70 @@
+# SHACL shapes for the GROUND-TRUTH graph (validate.truth_graph): every card,
+# hidden ones included. Checks the structure and the conservation laws of a
+# game in play. Used by tests and by the CLI's --audit mode, never shown to models.
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix hn:  <https://example.org/hanabi#> .
+
+<https://example.org/hanabi/shapes/truth> a owl:Ontology ;
+    sh:declare [ sh:prefix "hn" ; sh:namespace "https://example.org/hanabi#"^^xsd:anyURI ] .
+
+# --- every card: one place, one identity ------------------------------------
+hn:TruthCardShape a sh:NodeShape ; sh:targetClass hn:Card ;
+    sh:property [ sh:path hn:inZone    ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "A card is in exactly one zone." ] ;
+    sh:property [ sh:path hn:hasColor  ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "Every card has exactly one colour." ] ;
+    sh:property [ sh:path hn:hasRank   ; sh:minCount 1 ; sh:maxCount 1 ; sh:message "Every card has exactly one rank." ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A card in a hand is held by exactly one player and has a slot." ;
+        sh:select """SELECT $this WHERE { $this hn:inZone ?z . ?z a hn:Hand .
+                     FILTER ( NOT EXISTS { $this hn:heldBy ?p } || NOT EXISTS { $this hn:slot ?i } ) }""" ] ;
+    # Hints never lie: what a holder was told equals the truth.
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A hint told the holder a colour or rank that is not the card's." ;
+        sh:select """SELECT $this WHERE {
+            { $this hn:knownColor ?k ; hn:hasColor ?c . FILTER(?k != ?c) }
+            UNION { $this hn:knownRank ?k ; hn:hasRank ?c . FILTER(?k != ?c) } }""" ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A hint ruled out the colour or rank the card actually has." ;
+        sh:select """SELECT $this WHERE {
+            { $this hn:excludedColor ?k ; hn:hasColor ?k }
+            UNION { $this hn:excludedRank ?k ; hn:hasRank ?k } }""" ] .
+
+# --- the fireworks: the cards on a stack are exactly 1..height of its colour ----
+hn:TruthStackShape a sh:NodeShape ; sh:targetClass hn:Stack ;
+    sh:property [ sh:path hn:stackHeight ; sh:minCount 1 ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:maxInclusive 5 ;
+                  sh:message "A stack's height is between 0 and 5." ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A stack holds a card of another colour." ;
+        sh:select """SELECT $this WHERE { $this hn:stackOf ?col . ?c hn:inZone $this ; hn:hasColor ?x . FILTER(?x != ?col) }""" ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A stack holds a card ranked above its height." ;
+        sh:select """SELECT $this WHERE { $this hn:stackHeight ?h . ?c hn:inZone $this ; hn:hasRank ?rk . ?rk hn:rankValue ?r . FILTER(?r > ?h) }""" ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A stack is missing a rank between 1 and its height." ;
+        sh:select """SELECT $this WHERE { $this hn:stackHeight ?h . ?rk a hn:Rank ; hn:rankValue ?r . FILTER(?r <= ?h)
+                     FILTER NOT EXISTS { ?c hn:inZone $this ; hn:hasRank ?rk } }""" ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A stack holds two cards of the same rank." ;
+        sh:select """SELECT $this WHERE { ?c1 hn:inZone $this ; hn:hasRank ?r . ?c2 hn:inZone $this ; hn:hasRank ?r . FILTER(?c1 != ?c2) }""" ] .
+
+# --- token pools: 0 <= available <= capacity, spent = capacity - available ------
+hn:TruthPoolShape a sh:NodeShape ; sh:targetClass hn:TokenState ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A token pool must satisfy 0 <= available <= capacity and spent = capacity - available." ;
+        sh:select """SELECT $this WHERE { $this hn:available ?a ; hn:capacity ?c ; hn:spent ?s .
+                     FILTER(?a < 0 || ?a > ?c || ?s != ?c - ?a) }""" ] .
+
+# --- conservation: every card of the deck exists exactly as often as declared ----
+hn:TruthGameShape a sh:NodeShape ; sh:targetClass hn:Game ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "The number of cards in the game is not the declared deck size." ;
+        sh:select """SELECT $this WHERE { $this a hn:Game . hn:Setup hn:deckTotalCards ?total .
+                     { SELECT $this (COUNT(?c) AS ?n) WHERE { $this a hn:Game . ?c a hn:Card } GROUP BY $this }
+                     FILTER(?n != ?total) }""" ] ;
+    sh:sparql [ a sh:SPARQLConstraint ; sh:prefixes <https://example.org/hanabi/shapes/truth> ;
+        sh:message "A colour/rank combination exists a different number of times than declared (copies per colour)." ;
+        sh:select """SELECT $this WHERE { $this a hn:Game .
+                     { SELECT $this ?col ?rk (COUNT(?c) AS ?n) WHERE { $this a hn:Game . ?col a hn:Color . ?rk a hn:Rank .
+                         OPTIONAL { ?c hn:hasColor ?col ; hn:hasRank ?rk } } GROUP BY $this ?col ?rk }
+                     ?rk hn:copiesPerColor ?k . FILTER(?n != ?k) }""" ] .

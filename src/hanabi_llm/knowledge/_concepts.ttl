@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------------------
+# Shared machinery for knowledge graphs (loaded whenever at least one is selected).
+#
+# A KNOWLEDGE GRAPH is an optional extra ontology file in this folder (for
+# example mdk.ttl) made of hn:Concept nodes: notes a model may consult through
+# the get_concepts tool. The baseline game loads none of them, so a baseline
+# run contains no strategy knowledge anywhere a model can reach.
+# Files whose name starts with an underscore are infrastructure, not selectable.
+# ---------------------------------------------------------------------------
+
+@prefix hn:   <https://example.org/hanabi#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+hn:Concept      a rdfs:Class ; rdfs:comment "A piece of game knowledge a player may consult: grouped by hn:category." .
+
+
+hn:category       a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string ;
+                  rdfs:comment "Free-text grouping of a concept within its knowledge graph (for example mechanic, dynamic, kinetic)." .
+hn:summary        a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string .
+hn:guidance       a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string ;
+                  rdfs:comment "Actionable advice that follows from the concept." .
+hn:measuredBy     a rdf:Property ; rdfs:domain hn:Concept ;
+                  rdfs:comment "Graph property or tool from which the quantity can be read or computed." .
+hn:conceptName    a rdf:Property ; rdfs:domain hn:Concept ; rdfs:range xsd:string .
+
+# The tool that exposes the concepts of whichever knowledge graphs are loaded.
+hn:AffGetConcepts a hn:Affordance ;
+    hn:family "knowledge" ; hn:endsTurn false ;
+    hn:functionName "get_concepts" ;
+    hn:description "Consult the game notes you have been given. With no arguments, list them by category. Give `category` to filter, or `name` to read one note in full." ;
+    hn:effectFunction "tool_get_concepts" ;
+    hn:hasParameter hn:ParamConceptCategory, hn:ParamConceptName .
+
+hn:ParamConceptCategory a hn:Parameter ;
+    hn:paramName "category" ; hn:paramType "string" ; hn:optional true ;
+    hn:paramDescription "A category as listed in the overview. Omit to list everything." .
+
+hn:ParamConceptName a hn:Parameter ;
+    hn:paramName "name" ; hn:paramType "string" ; hn:optional true ;
+    hn:paramDescription "The name of one note, as listed in the overview, to read in full." .

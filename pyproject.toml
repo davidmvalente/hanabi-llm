@@ -1,0 +1,47 @@
+[project]
+name = "hanabi-llm"
+version = "0.1.0"
+description = "Hanabi played by tool-calling language models over OpenRouter, with an RDF ontology as the rules source of truth."
+requires-python = ">=3.12"
+dependencies = [
+    "rdflib>=7.0",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+audit = ["pyshacl>=0.26"]   # SHACL audit of games in play (validate.py, --audit)
+
+[project.scripts]
+hanabi-llm = "hanabi_llm.__main__:main"
+hanabi-view = "hanabi_llm.viewer:main"
+hanabi-trace = "hanabi_llm.trace_report:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.11",
+    "types-pyyaml>=6.0",
+    "pyshacl>=0.26",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hanabi_llm"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+files = ["src/hanabi_llm"]
+
+[[tool.mypy.overrides]]
+module = ["pyshacl"]
+ignore_missing_imports = true

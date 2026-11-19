@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hanabi viewer</title>
+<style>
+  :root {
+    --bg: #12141a; --panel: #1b1e27; --line: #2c3140; --text: #e6e8ee; --muted: #8b93a7;
+    --red: #e5484d; --yellow: #f2c94c; --green: #3fb27f; --blue: #4c7ef3; --white: #e8ebf0;
+    --good: #3fb27f; --bad: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 12px 16px 24px; display: grid; gap: 12px; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+  h1 { font-size: 18px; margin: 0; }
+  #status { color: var(--muted); }
+  #status b { color: var(--text); font-weight: 600; }
+  .live::before { content: "● "; color: var(--good); }
+  .done::before { content: "■ "; color: var(--muted); }
+  header label { margin-left: auto; color: var(--muted); }
+  select, button, input[type=range] { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  select, button { padding: 4px 10px; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); } button:disabled { opacity: .4; cursor: default; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+  .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin-right: 6px; }
+  .pips { display: inline-flex; gap: 4px; vertical-align: middle; }
+  .pip { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--muted); }
+  .pip.on.hint { background: var(--yellow); border-color: var(--yellow); }
+  .pip.on.fuse { background: var(--bad); border-color: var(--bad); }
+  .banner { padding: 6px 10px; border-radius: 6px; background: #3a2d12; color: var(--yellow); }
+  .banner.over { background: #3a1517; color: #ff9ea1; }
+  .stacks { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 8px; margin-top: 10px; }
+  .stack { text-align: center; }
+  .stack .name { font-size: 12px; color: var(--muted); }
+  .tile { display: inline-grid; place-items: center; width: 40px; height: 54px; border-radius: 7px; font-weight: 700; font-size: 20px; border: 2px solid transparent; }
+  .tile.empty { border: 2px dashed var(--line); color: var(--muted); font-weight: 400; }
+  .tile.back { background: #262b3a; color: var(--muted); border-color: #3a4156; }
+  .tile.sm { width: 22px; height: 28px; font-size: 13px; border-radius: 4px; border-width: 1px; }
+  .tile.dark { color: #15171d; }
+  .tile.cur { outline: 2px solid var(--text); outline-offset: 2px; }
+  .discard { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 8px; align-items: center; }
+  .hand { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--line); }
+  .hand:first-child { border-top: 0; }
+  .who { min-width: 130px; font-weight: 600; } .who small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; word-break: break-all; }
+  .cards { display: flex; flex-wrap: wrap; gap: 8px; }
+  .card { text-align: center; width: 64px; } .card .slot { font-size: 11px; color: var(--muted); }
+  .card .know { font-size: 11px; color: var(--muted); min-height: 2.6em; line-height: 1.25; overflow-wrap: anywhere; }
+  .hidden-hand { font-size: 12px; color: var(--muted); font-style: italic; }
+  #log { height: 13rem; overflow-y: auto; font-size: 14px; display: grid; align-content: start; gap: 2px; }
+  #log div { padding: 1px 2px; } #log .t { color: var(--muted); font-size: 12px; }
+  #log .muted { color: var(--muted); } #log .ok { color: var(--good); } #log .no { color: var(--bad); font-weight: 600; }
+  #log .pname { font-weight: 600; } #log .chip { display: inline-block; text-align: center; border-radius: 3px; padding: 0 5px; font-weight: 700; font-size: 12px; white-space: nowrap; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls input[type=range] { flex: 1 1 200px; padding: 0; accent-color: var(--blue); }
+  .controls label { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Hanabi</h1>
+    <span id="status" role="status">connecting…</span>
+    <label>Blind a hand <select id="blind" aria-label="Hide the cards of one player"></select></label>
+  </header>
+
+  <section class="panel" aria-label="Board">
+    <div class="row">
+      <span><span class="label">Hints</span><span class="pips" id="hints"></span> <span id="hintsTxt"></span></span>
+      <span><span class="label">Fuses</span><span class="pips" id="fuses"></span> <span id="fusesTxt"></span></span>
+      <span><span class="label">Deck</span><span id="deck"></span></span>
+      <span><span class="label">Score</span><span id="score"></span></span>
+    </div>
+    <div id="banner"></div>
+    <div class="stacks" id="stacks"></div>
+    <div class="discard" id="discard"></div>
+  </section>
+
+  <section class="panel" aria-label="Hands" id="hands"></section>
+
+  <section class="panel" aria-label="Log"><div id="log" role="log"></div></section>
+
+  <div class="controls">
+    <button id="first" aria-label="First">⏮</button><button id="prev" aria-label="Previous">◀</button>
+    <input id="scrub" type="range" min="0" max="0" value="0" aria-label="Move through the game">
+    <button id="next" aria-label="Next">▶</button><button id="last" aria-label="Latest">⏭</button>
+    <span id="frame" class="label"></span>
+    <label><input id="follow" type="checkbox" checked> follow live</label>
+  </div>
+</div>
+
+<script>
+"use strict";
+const COLOR = { red: "#e5484d", yellow: "#f2c94c", green: "#3fb27f", blue: "#4c7ef3", white: "#e8ebf0" };
+const DARK_TEXT = new Set(["yellow", "white"]);
+const PLAYER = ["#c084fc", "#2dd4bf", "#fb923c", "#f472b6", "#94a3b8"];
+
+let frames = [], k = 0, follow = true, live = true, blind = "";
+const $ = (id) => document.getElementById(id);
+
+// Small DOM helper. Everything is built with textContent, never innerHTML.
+function el(tag, cls, text, style) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = text;
+  if (style) Object.assign(e.style, style);
+  return e;
+}
+const names = () => frames[0].record.names;
+const playerColor = (seat) => PLAYER[seat % PLAYER.length];
+const who = (seat) => el("span", "pname", names()[seat], { color: playerColor(seat) });
+
+function tile(color, rank, cls) {                   // a face-up card
+  const t = el("span", "tile " + (cls || "") + (DARK_TEXT.has(color) ? " dark" : ""), rank, { background: COLOR[color] });
+  t.title = color + " " + rank;
+  return t;
+}
+function backTile(c, cls) {                         // a hidden card: only what hints told the holder
+  const t = el("span", "tile back " + (cls || ""), c.known_rank ?? "?");
+  if (c.known_color) { t.style.borderColor = COLOR[c.known_color]; t.style.color = COLOR[c.known_color]; }
+  t.title = "hidden card";
+  return t;
+}
+function knows(c) {                                 // what the holder has been told, including negatives
+  const p = [];
+  if (c.known_color) p.push(c.known_color);
+  if (c.known_rank) p.push(String(c.known_rank));
+  for (const x of c.not_colors) p.push("¬" + x);
+  for (const x of c.not_ranks) p.push("¬" + x);
+  return p.length ? p.join(" ") : "–";
+}
+function pips(host, available, capacity, kind) {
+  host.replaceChildren(...Array.from({ length: capacity }, (_, i) => el("span", "pip " + kind + (i < available ? " on" : ""))));
+}
+
+function drawBoard(s, header) {
+  pips($("hints"), s.hints.available, s.hints.capacity, "hint");
+  $("hintsTxt").textContent = `${s.hints.available} available · ${s.hints.spent} spent`;
+  pips($("fuses"), s.fuses.available, s.fuses.capacity, "fuse");
+  $("fusesTxt").textContent = `${s.fuses.available} available · ${s.fuses.spent} spent`;
+  $("deck").textContent = s.deck_size;
+  $("score").textContent = `${s.score}/${s.colors.length * s.top_rank}`;
+
+  const banner = $("banner"); banner.replaceChildren();
+  if (s.over_reason) banner.append(el("div", "banner over", "Game over: " + s.over_reason));
+  else if (s.final_turns_left !== null) banner.append(el("div", "banner", `Final round: ${s.final_turns_left} turn(s) left`));
+
+  $("stacks").replaceChildren(...s.colors.map((c) => {
+    const h = s.stacks[c], box = el("div", "stack");
+    box.append(h ? tile(c, h) : el("span", "tile empty", "·"), el("div", "name", h >= s.top_rank ? `${c} ✓` : `${c} → ${h + 1}`));
+    return box;
+  }));
+
+  const order = (c) => s.colors.indexOf(c.color) * 10 + c.rank;
+  const pile = [...s.discard].sort((a, b) => order(a) - order(b));
+  $("discard").replaceChildren(el("span", "label", `Discard (${pile.length})`), ...pile.map((c) => tile(c.color, c.rank, "sm")));
+}
+
+function drawHands(s, header) {
+  $("hands").replaceChildren(...s.hands.map((hand, seat) => {
+    const row = el("div", "hand"), name = names()[seat], hidden = name === blind;
+    const w = el("div", "who"); w.append(el("span", "", (s.current === seat && !s.over_reason ? "▶ " : "") + name, { color: playerColor(seat) }));
+    w.append(el("small", "", header.seats?.[name] ?? ""));
+    const cards = el("div", "cards");
+    hand.forEach((c, slot) => {
+      const card = el("div", "card");
+      card.append(el("div", "slot", slot), hidden || c.color === null ? backTile(c) : tile(c.color, c.rank), el("div", "know", knows(c)));
+      cards.append(card);
+    });
+    row.append(w, cards);
+    if (hidden) row.append(el("span", "hidden-hand", "blinded: you see what its holder sees"));
+    return row;
+  }));
+}
+
+// The wording comes from the server (narrate.py) as typed segments; this only styles them.
+function chip(c) {                                   // "blue 1": the colour is also in the TEXT, so it survives copy and paste
+  return el("span", "chip", `${c.color} ${c.rank}`, { background: COLOR[c.color], color: DARK_TEXT.has(c.color) ? "#15171d" : "#fff" });
+}
+function renderSegments(line, segs) {
+  for (const g of segs) {
+    if (g.k === "turn") line.append(el("span", "t", "T" + g.v), " ");
+    else if (g.k === "player") line.append(who(g.seat));
+    else if (g.k === "text") line.append(g.v);
+    else if (g.k === "value") line.append(g.attribute === "color" ? el("b", "", g.value, { color: COLOR[g.value] }) : el("b", "", "rank " + g.value));
+    else if (g.k === "card") {
+      const hidden = g.card === null || g.card.color === null || (g.secret_from !== undefined && names()[g.secret_from] === blind);
+      line.append(hidden ? "a card" : chip(g.card));
+    } else if (g.k === "mark") line.append(el("span", g.tone === "ok" ? "ok" : "no", (g.tone === "ok" ? "✓ " : "✗ ") + g.v));
+  }
+}
+
+function resultLine(rec) {
+  const line = el("div"); line.append(el("span", "t", "end"), " ");
+  line.append(rec.fault ? el("span", "no", `Aborted: ${rec.fault.player} - ${rec.fault.kind}: ${rec.fault.detail}`)
+                        : el("span", "muted", `Result: ${rec.status}, score ${rec.score}, official ${rec.official_score}`));
+  return line;
+}
+
+function drawLog() {
+  const log = $("log"), atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+  const lines = []; let last = null;                 // `last` = the line of the previous action, so its draw joins it
+  for (let i = 1; i <= k; i++) {
+    const f = frames[i], rec = f.record;
+    if (rec.type === "result") { lines.push(resultLine(rec)); last = null; continue; }
+    if (rec.kind === "draw" && last && last.actor === rec.actor && last.turn === rec.turn) {
+      last.line.append(" and"); renderSegments(last.line, f.segments.filter((g) => g.k !== "turn" && g.k !== "player"));
+      last = null; continue;
+    }
+    const line = el("div"); renderSegments(line, f.segments); lines.push(line);
+    last = rec.kind === "play" || rec.kind === "discard" ? { line, actor: rec.actor, turn: rec.turn } : null;
+  }
+  log.replaceChildren(...lines);
+  if (follow || atBottom) requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });  // after layout
+}
+
+function syncControls() {
+  const last = frames.length - 1, scrub = $("scrub");
+  scrub.max = last; scrub.value = k;
+  $("first").disabled = $("prev").disabled = k <= 0;
+  $("next").disabled = $("last").disabled = k >= last;
+  $("frame").textContent = `${k}/${last}`;
+  $("follow").checked = follow;
+}
+
+function draw() {
+  if (!frames.length) { $("status").textContent = "waiting for the feed…"; return; }
+  const header = frames[0].record, f = frames[k], s = f.state;
+  const sel = $("blind");
+  if (sel.options.length !== header.names.length + 1) {
+    sel.replaceChildren(el("option", "", "no one (see everything)"), ...header.names.map((n) => el("option", "", n)));
+    sel.options[0].value = "";
+    header.names.forEach((n, i) => (sel.options[i + 1].value = n));
+    sel.value = blind;
+  }
+  const st = $("status"); st.replaceChildren(el("span", live ? "live" : "done"), ` seed ${header.seed} · turn `, el("b", "", s.turn), ` · ${live ? "following" : "finished"}`);
+  st.className = "";
+  drawBoard(s, header); drawHands(s, header); drawLog(); syncControls();
+}
+
+function go(i) { k = Math.max(0, Math.min(frames.length - 1, i)); follow = k === frames.length - 1; draw(); }
+$("first").onclick = () => go(0); $("prev").onclick = () => go(k - 1);
+$("next").onclick = () => go(k + 1); $("last").onclick = () => go(frames.length - 1);
+$("scrub").oninput = (e) => go(Number(e.target.value));
+$("follow").onchange = (e) => { follow = e.target.checked; if (follow) go(frames.length - 1); };
+$("blind").onchange = (e) => { blind = e.target.value; draw(); };
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowLeft") go(k - 1); else if (e.key === "ArrowRight") go(k + 1);
+});
+
+const es = new EventSource("/stream");
+es.onmessage = (ev) => {
+  const f = JSON.parse(ev.data);
+  if (f.i === 0) frames = [];                   // a reconnect replays from the start
+  frames.push(f);
+  if (follow) k = frames.length - 1;
+  draw();
+};
+es.addEventListener("done", () => { live = false; es.close(); draw(); });
+es.onerror = () => { if (live) $("status").textContent = "disconnected, retrying…"; };
+</script>
+</body>
+</html>
